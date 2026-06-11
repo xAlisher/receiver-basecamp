@@ -20,6 +20,23 @@ Tor hidden service. Runs on the **latest** Basecamp (Linux **and** macOS/arm64),
 - **Settings cogwheel** — listener buffer (2–20s) and a **Hide cache** privacy toggle (suppress + clear
   on-disk stream cache).
 
+## Runtime dependencies (per-OS, on PATH)
+
+Playback spawns helper binaries resolved via `resolveBin()` (env override → `<module-dir>/bin` →
+**PATH**). The module manages its **own listener tor** (its own `SocksPort`, not the system service)
+and plays `.onion` via `torsocks ffplay`. So the binaries just need to be installed:
+
+| OS | Install |
+|----|---------|
+| Linux (Debian/Ubuntu) | `sudo apt install -y tor torsocks ffmpeg` |
+| macOS | `brew install tor torsocks ffmpeg` |
+
+Bundling these *inside* the `.lgx` isn't possible yet — the portable bundler drops extra binaries
+([logos-module-builder#114](https://github.com/logos-co/logos-module-builder/issues/114)). Once a
+per-variant `runtimeBins` mechanism lands upstream, receiver can ship them self-contained per arch
+(incl. macOS-native). Until then: PATH + the one-line install above. Override paths with
+`RECEIVER_TOR_BIN` / `RECEIVER_TORSOCKS_BIN` / `RECEIVER_FFPLAY_BIN` if needed.
+
 ## Build / run
 
 ```bash

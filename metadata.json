@@ -10,7 +10,7 @@
   "dependencies": ["delivery_module"],
 
   "nix": {
-    "packages": { "build": [], "runtime": [] },
+    "packages": { "build": [], "runtime": ["tor", "torsocks", "ffmpeg"] },
     "external_libraries": [],
     "cmake": {
       "find_packages": [],

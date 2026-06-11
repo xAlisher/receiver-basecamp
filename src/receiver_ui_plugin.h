@@ -64,10 +64,22 @@ private:
     QString cacheDir() const;
     void log(const QString& line);
 
+    // playback (ported from radio-basecamp's proven listener half)
+    void killPlayer();
+    QString startFfplay();
+    QString ensureTorListen();          // spawn a listener tor (SocksPort) for .onion playback
+    void    killTorListen();
+    bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
+
     LogosAPI*     m_logosAPI = nullptr;
     LogosModules* m_logos    = nullptr;
     QTimer*       m_pruneTimer = nullptr;
-    QProcess*     m_player   = nullptr;
+
+    QProcess*     m_player    = nullptr;
+    QProcess*     m_torListen = nullptr;
+    QString       m_torListenDir;
+    QString       m_playingUrl;
+    int           m_listenSocksPort = 0;
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;

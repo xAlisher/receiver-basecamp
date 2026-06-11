@@ -6,15 +6,20 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPair>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QRandomGenerator>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTextStream>
 #include <QTimer>
 #include <QUrl>
+#include <dlfcn.h>
 
 namespace {
 constexpr int    kTtlMs       = 45000;   // drop a station after 45s without a heartbeat (3 missed beats)
@@ -22,6 +27,44 @@ constexpr int    kPruneMs     = 5000;
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
+
+bool isOnionUrl(const QString& url) { return QUrl(url).host().endsWith(QLatin1String(".onion")); }
+
+QString randomHex(int bytes) {
+    QString s;
+    for (int i = 0; i < bytes; ++i) s += QString("%1").arg(QRandomGenerator::global()->bounded(256), 2, 16, QChar('0'));
+    return s;
+}
+
+// Locate this .so on disk (so bundled helper binaries dropped next to it are found).
+QString moduleDir() {
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&isOnionUrl), &info) && info.dli_fname)
+        return QFileInfo(QString::fromUtf8(info.dli_fname)).absolutePath();
+    return QString();
+}
+
+// Resolve a runtime helper: env override → bundled (next to the .so, in bin/ or the module dir) →
+// bare name on PATH. Lets the install drop tor/torsocks/ffplay into the module dir (self-contained,
+// no system install) while still falling back to a system binary when present.
+QString resolveBin(const QString& name, const char* envVar) {
+    const QString env = qEnvironmentVariable(envVar);
+    if (!env.isEmpty()) return env;
+    const QString d = moduleDir();
+    if (!d.isEmpty())
+        for (const QString& c : { d + "/bin/" + name, d + "/" + name })
+            if (QFileInfo(c).isExecutable()) return c;
+    return name;  // fall back to PATH
+}
+
+// Spawned system binaries (tor/ffplay/torsocks) must NOT inherit the AppImage's LD_LIBRARY_PATH/
+// LD_PRELOAD or they load the wrong libevent/etc and die (skill: appimage-child-ld-library-path).
+QProcessEnvironment cleanSpawnEnv() {
+    QProcessEnvironment e = QProcessEnvironment::systemEnvironment();
+    e.remove(QStringLiteral("LD_LIBRARY_PATH"));
+    e.remove(QStringLiteral("LD_PRELOAD"));
+    return e;
+}
 }
 
 ReceiverUiPlugin::ReceiverUiPlugin(QObject* parent)
@@ -77,29 +120,43 @@ QString ReceiverUiPlugin::startDiscovery()
 
     if (!nodeReady()) {
         // preset logos.dev + relay:true to interop with live radio-basecamp hosts (e.g. Sneg's
-        // "Logos manifesto"); the demo defaults logos.test — we must match the host's fleet.
+        // "Logos manifesto"). The deployed logos.dev preset ships NO bootstrap nodes (observed
+        // bootstrapNodes=0 → currentPeerIds=[]), so supply the logos.dev entry nodes explicitly
+        // (these are the built-in logos.dev bootstrap multiaddrs — the same peers Sneg relays through).
+        QJsonArray entry{
+            QStringLiteral("/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby"),
+            QStringLiteral("/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH"),
+            QStringLiteral("/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397"),
+            QStringLiteral("/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH"),
+            QStringLiteral("/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP"),
+            QStringLiteral("/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE")
+        };
         QJsonObject cfg{
             {"logLevel", "INFO"},
             {"mode", "Core"},
             {"preset", "logos.dev"},
-            {"relay", true}
+            {"relay", true},
+            {"entryNodes", entry}
         };
         const QString cfgJson = QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
 
+        // Best-effort: the calls take effect server-side even when the cross-version LogosResult
+        // marshals back as success=false (receiver is built against delivery v0.1.1; the platform
+        // ships a newer delivery). Do NOT bail on the result — that's what left the UI stuck on
+        // "initializing" while the node had in fact started.
         LogosResult c = m_logos->delivery_module.createNode(cfgJson);
-        if (!c.success) { setLastError(c.getError()); log("createNode failed: " + c.getError()); return c.getError(); }
-
+        if (!c.success) log(QStringLiteral("createNode reported error (continuing): ") + c.getError());
         LogosResult st = m_logos->delivery_module.start();
-        if (!st.success) { setLastError(st.getError()); log("start failed: " + st.getError()); return st.getError(); }
+        if (!st.success) log(QStringLiteral("start reported error (continuing): ") + st.getError());
 
         setNodeReady(true);
-        log("delivery node started (logos.dev)");
+        log(QStringLiteral("delivery node up (logos.dev, %1 entry nodes)").arg(entry.size()));
     }
 
-    if (!subscribeTopic(directoryTopic()))
-        return QStringLiteral("subscribe failed");
-
+    subscribeTopic(directoryTopic());     // best-effort
     setDiscovering(true);
+    if (connectionStatus() == QLatin1String("initializing"))
+        setConnectionStatus(QStringLiteral("connecting"));   // unstick the status until peers arrive
     log("discovering on " + directoryTopic());
     return QString();
 }
@@ -128,8 +185,8 @@ bool ReceiverUiPlugin::subscribeTopic(const QString& topic)
 {
     if (!m_logos) return false;
     if (m_subscribed.contains(topic)) return true;
-    LogosResult r = m_logos->delivery_module.subscribe(topic);
-    if (!r.success) { setLastError(r.getError()); return false; }
+    LogosResult r = m_logos->delivery_module.subscribe(topic);   // best-effort (LogosResult unreliable cross-version)
+    if (!r.success) log(QStringLiteral("subscribe(%1) reported error (continuing): %2").arg(topic, r.getError()));
     m_subscribed.insert(topic);
     return true;
 }
@@ -200,58 +257,153 @@ void ReceiverUiPlugin::publishStations()
 
 QString ReceiverUiPlugin::play(QString streamUrl, QString stationName)
 {
-    // Security seam: only http(s) — reject file:/pipe:/concat: so an attacker-controlled announce
-    // URL is safe to hand to ffplay (lifted from radio-basecamp).
-    const QUrl u(streamUrl);
-    const QString scheme = u.scheme().toLower();
-    if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
-        return QStringLiteral("refused: only http(s) stream URLs are allowed");
-
-    stopPlayback();
-
-    const bool onion = u.host().endsWith(QLatin1String(".onion"));
-    QStringList args;
-    QString program;
-    if (onion) {
-        program = QStringLiteral("torsocks");
-        args << QStringLiteral("ffplay");
-    } else {
-        program = QStringLiteral("ffplay");
+    // Security seam (radio #18): a station's streamUrl is attacker-controlled (anyone can announce).
+    // Only let ffplay open http/https — never file:/pipe:/concat:/device/other ffmpeg protocols.
+    const QString scheme = QUrl(streamUrl).scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https")) {
+        log("refused unsafe stream URL (only http/https): " + streamUrl);
+        return QStringLiteral("unsafe_url");
     }
-    args << QStringLiteral("-nodisp") << QStringLiteral("-autoexit")
-         << QStringLiteral("-loglevel") << QStringLiteral("warning")
-         // MediaMTX gates onion HLS with a Secure cookie ffmpeg won't return over http → supply it.
-         << QStringLiteral("-cookies") << QStringLiteral("cookieCheck=1; path=/")
-         // listener jitter buffer to ride out Tor latency (mpegts HLS)
-         << QStringLiteral("-infbuf") << QStringLiteral("-live_start_index") << QString::number(-listenBuffer())
-         << streamUrl;
-
-    m_player = new QProcess(this);
-    // Strip LD_LIBRARY_PATH/LD_PRELOAD so the spawned system tor/ffplay don't load the AppImage's
-    // poisoned libs (skill: appimage-child-ld-library-path).
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.remove(QStringLiteral("LD_LIBRARY_PATH"));
-    env.remove(QStringLiteral("LD_PRELOAD"));
-    m_player->setProcessEnvironment(env);
-    m_player->start(program, args);
-    if (!m_player->waitForStarted(3000)) {
-        const QString err = m_player->errorString();
-        delete m_player; m_player = nullptr;
-        return QStringLiteral("playback failed to start: ") + err;
-    }
+    m_playingUrl = streamUrl;
     setNowPlaying(stationName.isEmpty() ? streamUrl : stationName);
+    const QString e = startFfplay();
+    if (!e.isEmpty()) {
+        m_playingUrl.clear();
+        setNowPlaying(QString());
+        log("playback failed: " + e);
+        return e;
+    }
     log("playing \"" + nowPlaying() + "\"");
     return QString();
 }
 
+QString ReceiverUiPlugin::startFfplay()
+{
+    killPlayer();
+    const bool onion = isOnionUrl(m_playingUrl);
+    if (onion) {
+        const QString te = ensureTorListen();   // .onion needs a local tor SOCKS proxy
+        if (!te.isEmpty()) return te;
+    } else {
+        killTorListen();
+    }
+
+    const QString ffplay = resolveBin(QStringLiteral("ffplay"), "RECEIVER_FFPLAY_BIN");
+    QStringList ffargs;
+    ffargs << "-nodisp" << "-autoexit" << "-loglevel" << "error" << "-infbuf"
+           // MediaMTX gates onion HLS with a Secure cookieCheck cookie ffmpeg won't return over the
+           // http onion → 302 loop → no audio. Pre-supply it (radio onion fix).
+           << "-cookies" << "cookieCheck=1; path=/";
+    if (listenBuffer() > 0)
+        ffargs << "-live_start_index" << QString::number(-listenBuffer());   // jitter buffer (segments behind live)
+    ffargs << m_playingUrl;
+
+    QString program; QStringList args;
+    if (onion) {
+        // ffmpeg has no native SOCKS → route .onion playback through torsocks (LD_PRELOAD → tor SOCKS).
+        program = resolveBin(QStringLiteral("torsocks"), "RECEIVER_TORSOCKS_BIN");
+        args = QStringList() << ffplay << ffargs;
+    } else {
+        program = ffplay; args = ffargs;
+    }
+
+    m_player = new QProcess(this);
+    QProcessEnvironment env = cleanSpawnEnv();
+    if (onion) {
+        // Lock torsocks onto OUR tor SOCKS instance (radio Senty ISSUE-4) — else it uses the compiled-in
+        // 9050 default and could fail or leak via a direct connection.
+        env.insert("TORSOCKS_TOR_ADDRESS", "127.0.0.1");
+        env.insert("TORSOCKS_TOR_PORT", QString::number(m_listenSocksPort));
+        env.insert("TORSOCKS_ISOLATE_PID", "1");
+    }
+    m_player->setProcessEnvironment(env);
+    m_player->start(program, args);
+    if (!m_player->waitForStarted(5000)) {
+        const bool notFound = m_player->error() == QProcess::FailedToStart;
+        qWarning() << "receiver_ui: player failed:" << m_player->errorString();
+        killPlayer();
+        return notFound ? QStringLiteral("ffplay/torsocks not found") : QStringLiteral("ffplay_failed");
+    }
+    return QString();
+}
+
+void ReceiverUiPlugin::killPlayer()
+{
+    if (!m_player) return;
+    m_player->terminate();
+    if (!m_player->waitForFinished(2000)) m_player->kill();
+    m_player->deleteLater();
+    m_player = nullptr;
+}
+
+QString ReceiverUiPlugin::ensureTorListen()
+{
+    if (m_torListen && m_torListen->state() == QProcess::Running) return QString();
+    const int base = 9250;   // dedicated listener SOCKS range (avoid system tor's 9050)
+    QString err;
+    for (int off = 0; off < 4; ++off) {
+        const int p = base + off;
+        QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                      + "/receiver_ui/torlisten-" + randomHex(4);
+        QString cfg;
+        QTextStream s(&cfg);
+        s << "SocksPort " << p << "\n"
+          << "DataDirectory " << dir << "/data\n"
+          << "Log notice file " << dir << "/tor.log\n";
+        if (startTorProc(dir, cfg, p, err)) { m_torListenDir = dir; m_listenSocksPort = p; return QString(); }
+    }
+    return err.isEmpty() ? QStringLiteral("tor_listen_failed") : err;
+}
+
+void ReceiverUiPlugin::killTorListen()
+{
+    if (!m_torListen) return;
+    m_torListen->terminate();
+    if (!m_torListen->waitForFinished(2000)) m_torListen->kill();
+    m_torListen->deleteLater();
+    m_torListen = nullptr;
+    if (!m_torListenDir.isEmpty()) { QDir(m_torListenDir).removeRecursively(); m_torListenDir.clear(); }
+    m_listenSocksPort = 0;
+}
+
+bool ReceiverUiPlugin::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
+{
+    const QString bin = resolveBin(QStringLiteral("tor"), "RECEIVER_TOR_BIN");
+    const QString dataDir = dir + "/data", torrc = dir + "/torrc";
+    auto fail = [&](const QString& code) { QDir(dir).removeRecursively(); errOut = code; return false; };
+    if (!QDir().mkpath(dataDir)) return fail(QStringLiteral("tor_dir_failed"));
+    const QFileDevice::Permissions ownerOnly =
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+    QFile::setPermissions(dir, ownerOnly);
+    QFile::setPermissions(dataDir, ownerOnly);
+    QFile f(torrc);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return fail(QStringLiteral("tor_cfg_failed"));
+    f.write(cfg.toUtf8()); f.close();
+
+    m_torListen = new QProcess(this);
+    m_torListen->setProcessChannelMode(QProcess::MergedChannels);
+    m_torListen->setProcessEnvironment(cleanSpawnEnv());
+    m_torListen->start(bin, QStringList() << "-f" << torrc);
+    if (!m_torListen->waitForStarted(5000)) {
+        const bool notFound = m_torListen->error() == QProcess::FailedToStart;
+        qWarning() << "receiver_ui: tor failed to start:" << m_torListen->errorString();
+        m_torListen->deleteLater(); m_torListen = nullptr;
+        return fail(notFound ? QStringLiteral("tor not found (install/bundle tor)") : QStringLiteral("tor_start_failed"));
+    }
+    if (m_torListen->waitForFinished(500)) {   // immediate exit ⇒ bad cfg / port in use
+        qWarning() << "receiver_ui: tor exited immediately:" << m_torListen->readAll();
+        m_torListen->deleteLater(); m_torListen = nullptr;
+        return fail(QStringLiteral("tor_port_in_use"));
+    }
+    log(QStringLiteral("listener tor up (SOCKS %1)").arg(m_listenSocksPort));
+    return true;
+}
+
 QString ReceiverUiPlugin::stopPlayback()
 {
-    if (m_player) {
-        m_player->kill();
-        m_player->waitForFinished(1500);
-        delete m_player;
-        m_player = nullptr;
-    }
+    killPlayer();
+    killTorListen();
+    m_playingUrl.clear();
     if (!nowPlaying().isEmpty()) { setNowPlaying(QString()); log("playback stopped"); }
     return QString();
 }
