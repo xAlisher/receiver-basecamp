@@ -11,7 +11,8 @@
 #include "rep_receiver_ui_source.h"
 
 class LogosAPI;
-class LogosModules;
+class LogosAPIClient;
+class LogosObject;
 class QTimer;
 class QProcess;
 
@@ -71,9 +72,11 @@ private:
     void    killTorListen();
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
 
-    LogosAPI*     m_logosAPI = nullptr;
-    LogosModules* m_logos    = nullptr;
-    QTimer*       m_pruneTimer = nullptr;
+    LogosAPI*       m_logosAPI = nullptr;
+    LogosAPIClient* m_delivery = nullptr;   // ONLY the delivery client (not all-module LogosModules, which hangs)
+    LogosObject*    m_deliveryObj = nullptr;
+    bool            m_eventsWired = false;
+    QTimer*         m_pruneTimer = nullptr;
 
     QProcess*     m_player    = nullptr;
     QProcess*     m_torListen = nullptr;

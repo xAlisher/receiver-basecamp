@@ -2,6 +2,7 @@
 #include "logos_api.h"
 #include "logos_sdk.h"
 #include "logos_types.h"
+#include "token_manager.h"   // stash↔storage workaround: pre-seed the capability token (see initLogos)
 
 #include <QDebug>
 #include <QDir>
@@ -19,7 +20,6 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
-#include <dlfcn.h>
 
 namespace {
 constexpr int    kTtlMs       = 45000;   // drop a station after 45s without a heartbeat (3 missed beats)
@@ -27,6 +27,16 @@ constexpr int    kPruneMs     = 5000;
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
+
+// File diagnostic — ui-host child stderr/qInfo is swallowed (#163), so write a timestamped trail to
+// a file we can read out-of-band. TEMP instrumentation for the spinner/discovery investigation.
+void diag(const QString& m) {
+    QFile f(QStringLiteral("/tmp/receiver-diag.log"));
+    if (f.open(QIODevice::Append | QIODevice::WriteOnly)) {
+        f.write((QDateTime::currentDateTime().toString("HH:mm:ss.zzz") + "  " + m + "\n").toUtf8());
+        f.close();
+    }
+}
 
 bool isOnionUrl(const QString& url) { return QUrl(url).host().endsWith(QLatin1String(".onion")); }
 
@@ -36,25 +46,12 @@ QString randomHex(int bytes) {
     return s;
 }
 
-// Locate this .so on disk (so bundled helper binaries dropped next to it are found).
-QString moduleDir() {
-    Dl_info info;
-    if (dladdr(reinterpret_cast<void*>(&isOnionUrl), &info) && info.dli_fname)
-        return QFileInfo(QString::fromUtf8(info.dli_fname)).absolutePath();
-    return QString();
-}
-
-// Resolve a runtime helper: env override → bundled (next to the .so, in bin/ or the module dir) →
-// bare name on PATH. Lets the install drop tor/torsocks/ffplay into the module dir (self-contained,
-// no system install) while still falling back to a system binary when present.
+// Resolve a runtime helper: env override → bare name on PATH (option 1: tor/ffmpeg installed per-OS).
+// NB: deliberately no dladdr/"next to the .so" lookup — that pulls dladdr@GLIBC_2.34, which the
+// AppImage's older bundled glibc can't resolve, so the plugin fails to dlopen (sidebar spinner).
 QString resolveBin(const QString& name, const char* envVar) {
     const QString env = qEnvironmentVariable(envVar);
-    if (!env.isEmpty()) return env;
-    const QString d = moduleDir();
-    if (!d.isEmpty())
-        for (const QString& c : { d + "/bin/" + name, d + "/" + name })
-            if (QFileInfo(c).isExecutable()) return c;
-    return name;  // fall back to PATH
+    return env.isEmpty() ? name : env;
 }
 
 // Spawned system binaries (tor/ffplay/torsocks) must NOT inherit the AppImage's LD_LIBRARY_PATH/
@@ -75,48 +72,80 @@ ReceiverUiPlugin::ReceiverUiPlugin(QObject* parent)
 ReceiverUiPlugin::~ReceiverUiPlugin()
 {
     stopPlayback();
-    delete m_logos;
+    // m_delivery is owned by LogosAPI — do not delete.
 }
 
 void ReceiverUiPlugin::initLogos(LogosAPI* api)
 {
-    if (m_logos) return;
+    if (m_logosAPI) return;
+    diag(QStringLiteral("initLogos ENTER"));
     m_logosAPI = api;
-    m_logos = new LogosModules(api);   // SAFE in ui-host (the exact call that crashes in a core sidecar)
-    setBackend(this);
 
-    // restore persisted settings (these are the generated READONLY-PROP source-side setters)
+    // setBackend FIRST → the view↔backend handshake completes immediately (no spinner). Constructing
+    // LogosModules synchronously here blocks that handshake in this busy profile → spinner. So defer it.
+    setBackend(this);
+    diag(QStringLiteral("initLogos setBackend done"));
+
+    // cheap, no IPC — restore persisted settings (generated READONLY-PROP source-side setters)
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
     setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 8).toInt(), 20));
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
-
-    wireEvents();
 
     m_pruneTimer = new QTimer(this);
     m_pruneTimer->setInterval(kPruneMs);
     QObject::connect(m_pruneTimer, &QTimer::timeout, this, &ReceiverUiPlugin::pruneStations);
     m_pruneTimer->start();
 
-    // Auto-start discovery once the event loop + QRO registry have settled
-    // (skill: ipc-client-eager-init — avoid touching the client straight out of initLogos).
-    QTimer::singleShot(2500, this, [this]{ startDiscovery(); });
+    // Get ONLY the delivery client SYNCHRONOUSLY here. Data: deferring getClient to a QTimer hung it
+    // hard (diag: "getClient(delivery_module)" with no return after 60s+). The working 2x4k build got
+    // the delivery client synchronously in initLogos (via LogosModules) and discovered. A single
+    // getClient is cheap (unlike the all-modules LogosModules that hung), so this shouldn't block the
+    // handshake. Only createNode/subscribe are deferred (the client needs a moment to be ready).
+    // PROVEN stash↔storage workaround for the getClient/IPC hang: pre-seed delivery_module's
+    // capability token in the process-wide TokenManager. Without it, getClient auto-provisions via
+    // capability_module.requestModule, which never completes here ("Failed to register token …
+    // delivery_module") → getClient blocks indefinitely (diag: "getClient(delivery_module)" with no
+    // return). Any non-empty token passes the (inverted-logic) server check (basecamp#150).
+    {
+        TokenManager& tm = TokenManager::instance();
+        if (tm.getToken(QStringLiteral("delivery_module")).isEmpty()) {
+            tm.saveToken(QStringLiteral("delivery_module"), QStringLiteral("receiver_bootstrap_v1"));
+            diag(QStringLiteral("initLogos: seeded delivery_module token"));
+        }
+    }
+
+    diag(QStringLiteral("initLogos: getClient(delivery_module) [sync]"));
+    m_delivery = m_logosAPI->getClient("delivery_module");
+    diag(QStringLiteral("initLogos: getClient -> %1").arg(m_delivery ? QStringLiteral("ok") : QStringLiteral("NULL")));
+    wireEvents();
+    QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire startDiscovery")); startDiscovery(); });
+    diag(QStringLiteral("initLogos EXIT"));
 }
 
 void ReceiverUiPlugin::wireEvents()
 {
-    m_logos->delivery_module.on("connectionStateChanged", [this](const QVariantList& d) {
-        if (!d.isEmpty()) setConnectionStatus(d.at(0).toString());
-    });
-    m_logos->delivery_module.on("messageReceived", [this](const QVariantList& d) {
-        // d: [0]=hash, [1]=topic, [2]=payload, [3]=timestamp(ns). The announce is in [2].
+    if (!m_delivery || m_eventsWired) return;
+    m_deliveryObj = m_delivery->requestObject("delivery_module");
+    if (!m_deliveryObj) { diag(QStringLiteral("wireEvents: requestObject NULL")); return; }
+    // raw onEvent (radio main-branch pattern): d[0]=hash, d[1]=topic, d[2]=payload(base64), d[3]=ts
+    m_delivery->onEvent(m_deliveryObj, "messageReceived", [this](const QString&, const QVariantList& d) {
         if (d.size() < 3) return;
         ingestAnnounce(d.at(2));
     });
+    m_eventsWired = true;
+    diag(QStringLiteral("wireEvents: onEvent(messageReceived) wired"));
 }
 
 QString ReceiverUiPlugin::startDiscovery()
 {
-    if (!m_logos) return QStringLiteral("backend not initialised");
+    if (!m_delivery) {
+        if (!m_logosAPI) return QStringLiteral("no_api");
+        diag(QStringLiteral("startDiscovery: getClient(delivery_module)"));
+        m_delivery = m_logosAPI->getClient("delivery_module");
+        diag(QStringLiteral("startDiscovery: getClient -> %1").arg(m_delivery ? QStringLiteral("ok") : QStringLiteral("NULL")));
+        if (!m_delivery) { log(QStringLiteral("no delivery client")); return QStringLiteral("no_delivery_client"); }
+    }
+    wireEvents();
 
     if (!nodeReady()) {
         // preset logos.dev + relay:true to interop with live radio-basecamp hosts (e.g. Sneg's
@@ -144,10 +173,13 @@ QString ReceiverUiPlugin::startDiscovery()
         // marshals back as success=false (receiver is built against delivery v0.1.1; the platform
         // ships a newer delivery). Do NOT bail on the result — that's what left the UI stuck on
         // "initializing" while the node had in fact started.
-        LogosResult c = m_logos->delivery_module.createNode(cfgJson);
-        if (!c.success) log(QStringLiteral("createNode reported error (continuing): ") + c.getError());
-        LogosResult st = m_logos->delivery_module.start();
-        if (!st.success) log(QStringLiteral("start reported error (continuing): ") + st.getError());
+        { TokenManager& tm = TokenManager::instance();   // re-seed (stash re-injects before each use)
+          if (tm.getToken(QStringLiteral("delivery_module")).isEmpty())
+              tm.saveToken(QStringLiteral("delivery_module"), QStringLiteral("receiver_bootstrap_v1")); }
+        diag(QStringLiteral("startDiscovery: invoke createNode"));
+        m_delivery->invokeRemoteMethod("delivery_module", "createNode", cfgJson);
+        m_delivery->invokeRemoteMethod("delivery_module", "start");
+        diag(QStringLiteral("startDiscovery: createNode+start invoked"));
 
         setNodeReady(true);
         log(QStringLiteral("delivery node up (logos.dev, %1 entry nodes)").arg(entry.size()));
@@ -163,9 +195,9 @@ QString ReceiverUiPlugin::startDiscovery()
 
 QString ReceiverUiPlugin::stopDiscovery()
 {
-    if (!m_logos) return QStringLiteral("backend not initialised");
+    if (!m_delivery) return QStringLiteral("backend not initialised");
     for (const QString& t : m_subscribed)
-        m_logos->delivery_module.unsubscribe(t);
+        m_delivery->invokeRemoteMethod("delivery_module", "unsubscribe", t);
     m_subscribed.clear();
     setDiscovering(false);
     log("discovery stopped");
@@ -183,10 +215,9 @@ QString ReceiverUiPlugin::addTopic(QString topic)
 
 bool ReceiverUiPlugin::subscribeTopic(const QString& topic)
 {
-    if (!m_logos) return false;
+    if (!m_delivery) return false;
     if (m_subscribed.contains(topic)) return true;
-    LogosResult r = m_logos->delivery_module.subscribe(topic);   // best-effort (LogosResult unreliable cross-version)
-    if (!r.success) log(QStringLiteral("subscribe(%1) reported error (continuing): %2").arg(topic, r.getError()));
+    m_delivery->invokeRemoteMethod("delivery_module", "subscribe", topic);
     m_subscribed.insert(topic);
     return true;
 }
