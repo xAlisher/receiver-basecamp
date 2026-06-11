@@ -110,13 +110,20 @@ void ReceiverUiPlugin::wireEvents()
     if (!m_delivery || m_eventsWired) return;
     m_deliveryObj = m_delivery->requestObject("delivery_module");
     if (!m_deliveryObj) { diag(QStringLiteral("wireEvents: requestObject NULL")); return; }
-    // raw onEvent (radio main-branch pattern): d[0]=hash, d[1]=topic, d[2]=payload(base64), d[3]=ts
-    m_delivery->onEvent(m_deliveryObj, "messageReceived", [this](const QString&, const QVariantList& d) {
-        if (d.size() < 3) return;
-        ingestAnnounce(d.at(2));
-    });
     m_eventsWired = true;
-    diag(QStringLiteral("wireEvents: onEvent(messageReceived) wired"));
+    // Defer onEvent by one event-loop iteration so the dynamic replica finishes initializing — its
+    // eventResponse signal doesn't exist until then, so a synchronous connect silently no-ops (this is
+    // the ONLY difference vs logos-chat-ui ChatBackend, the one ui-host that provably receives events;
+    // see research issue #4). Also try every arg (ingestAnnounce no-ops on non-announce args) + diag d.size.
+    QTimer::singleShot(0, this, [this]{
+        if (!m_deliveryObj) return;
+        m_delivery->onEvent(m_deliveryObj, "messageReceived", [this](const QString&, const QVariantList& d) {
+            diag(QStringLiteral("onEvent messageReceived: d.size=%1").arg(d.size()));
+            for (const QVariant& v : d) ingestAnnounce(v);
+        });
+        diag(QStringLiteral("wireEvents: onEvent subscribed (deferred singleShot 0)"));
+    });
+    diag(QStringLiteral("wireEvents: requestObject ok, onEvent deferred to next tick"));
 }
 
 QString ReceiverUiPlugin::startDiscovery()
