@@ -1,0 +1,27 @@
+// Qt Remote Objects contract for the Receiver backend.
+// PROPs auto-sync to QML (e.g. backend.nodeReady); SIGNALs arrive via Connections{target:backend};
+// SLOTs are called directly from QML (backend.startDiscovery()), wrapped in logos.watch(...).
+class ReceiverUi
+{
+    PROP(QString connectionStatus="initializing" READONLY)   // delivery connectionStateChanged
+    PROP(bool    nodeReady=false READONLY)                    // createNode + start succeeded
+    PROP(bool    discovering=false READONLY)                  // subscribed to the directory topic
+    PROP(QString lastError="" READONLY)
+
+    PROP(QString stationsJson="[]" READONLY)                  // JSON array of live stations (TTL-pruned)
+    PROP(QString nowPlaying="" READONLY)                      // station name currently playing ("" = stopped)
+
+    PROP(int     listenBuffer=8 READONLY)                     // listener jitter buffer, seconds (2–20)
+    PROP(bool    hideCache=false READONLY)                    // privacy: suppress on-disk stream cache
+
+    SIGNAL(activity(QString line))                            // human-readable log line for the UI
+
+    SLOT(QString startDiscovery())                            // createNode/start/subscribe directory topic
+    SLOT(QString stopDiscovery())
+    SLOT(QString addTopic(QString topic))                     // subscribe to a private/extra topic
+    SLOT(QString play(QString streamUrl, QString stationName))
+    SLOT(QString stopPlayback())
+    SLOT(QString setBuffer(int sec))         // mutator; reads back via the listenBuffer PROP
+    SLOT(QString setCacheHidden(bool on))    // mutator; reads back via the hideCache PROP
+    SLOT(QString clearCache())
+}
