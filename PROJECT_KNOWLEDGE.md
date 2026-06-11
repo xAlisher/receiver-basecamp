@@ -1,0 +1,64 @@
+# receiver-basecamp — Project Knowledge
+
+Accumulated wisdom. Patterns, pitfalls, proven facts. (Raw captures live in `docs/retro-log.md`.)
+
+---
+
+## What works (proven end-to-end, 2026-06-11)
+
+receiver_ui (single `ui_qml` module + C++ backend) **works fully on the 268 build** (`ef6dca8b`):
+loads, discovers the live Sneg "Logos manifesto" station over `delivery_module` (status pill green,
+264-byte announce received over the logos.dev relay), and **plays it over Tor** (`torsocks ffplay`,
+PipeWire sink active = audible). The module/architecture is correct.
+
+## The blocker: getClient("delivery_module") hangs on 295 — a PLATFORM regression
+
+On the current pre-release (`2cb9985c`/295), `getClient("delivery_module")` **blocks forever** (ui-host
+stays alive, event loop frozen → view handshake times out → permanent spinner / "stuck initializing").
+The identical call returns in **1 ms on 268**. Isolated by controlled comparison — same
+`delivery_module.so` (byte-identical `d872f77c`), same receiver, same minimal profile, same machine;
+**only the AppImage differs**. So it's the platform's getClient/capability/QRO layer, NOT receiver,
+delivery, profile, token, or version. `getClient("storage_module")` works on 295 (stash) → delivery-
+specific. Full skill: `basecamp-skills/delivery-getclient-hang-295`. (Exact line: pending gdb → upstream.)
+
+### Things that do NOT fix it on 295 (don't re-try)
+- init timing: synchronous-in-initLogos (→ blocks handshake → spinner) **or** deferred (→ event loop
+  frozen mid-getClient → no discovery). Both are the same hang at a different moment.
+- pre-seeding the capability token via `TokenManager::instance().saveToken("delivery_module", …)`
+  (stash↔storage workaround) — applied, getClient still hangs.
+- minimal isolated profile (only delivery + receiver) — still hangs (so it is NOT QRO-allocator
+  degradation from a busy profile, the `ipc-client-eager-init` "permanent failure mode").
+- matching the delivery version — moot: delivery **metadata version is `1.0.0` on every git tag**
+  (v0.1.1/v0.1.2/main); the tag pin doesn't change the running version.
+
+## Consumption shape (the correct one)
+
+- Get **only** the delivery client: `m_delivery = logosAPI->getClient("delivery_module")` +
+  `invokeRemoteMethod("delivery_module", "createNode"/"start"/"subscribe", …)` + `requestObject` +
+  `onEvent("messageReceived", …)`. Do **not** construct the all-modules typed `LogosModules` — its
+  eager getClient over *every* module in the profile hangs on one module's capability handshake.
+- `setBackend(this)` FIRST in initLogos (view source ready → fast handshake), then the delivery work.
+- `delivery_module` pinned to **main** in `flake.nix` (the zerokit/RLN nix build fix, delivery #49,
+  unblocks the v0.1.2 `zerokit-2.0.2` crates.io-403 that forced an earlier v0.1.1 pin).
+
+## Playback (lifted from radio, works)
+
+`torsocks ffplay` for `.onion`, `ffplay` for direct. The module spawns its **own listener tor**
+(`SocksPort`, bootstraps to 100%), then `torsocks ffplay` with `-cookies "cookieCheck=1; path=/"`
+(MediaMTX Secure-cookie) + `-infbuf -live_start_index -<buffer>` jitter buffer. Binaries via
+`resolveBin` (env → PATH); tor/ffmpeg installed per-OS (option 1; #114 blocks bundling in the lgx).
+
+## Reserved isolated environment (DO NOT touch from other work)
+
+- `~/logos-basecamp-radio-only.AppImage` (a duplicate of the 295 current) + profile
+  `~/.local/share/Logos-radio-only` — reserved for the receiver/radio demo. Launch:
+  `scripts/launch-radio-only.sh`. The 268 proof env: `~/logos-basecamp-khidr.AppImage` +
+  `~/.local/share/Logos-268-test`. Only ONE Basecamp runs at a time (separate profiles still share
+  delivery TCP port 60000 → two instances = conflict).
+
+## Diagnostics
+
+ui-host child stderr is swallowed (basecamp#163) and qInfo is filtered. The backend writes a
+timestamped file trail to `/tmp/receiver-diag.log` (`diag()` in `receiver_ui_plugin.cpp`) — this is
+how the getClient hang was finally pinned ("getClient(delivery_module)" line with no return). Keep it
+until the 295 issue is resolved.

@@ -1,5 +1,31 @@
 # Retro Log
 
+## Week of 2026-06-11 — receiver_ui build + the 295 getClient hang
+
+### Wins
+- [project] Receiver proven end-to-end on 268: discover (green) + onion playback (audible). The module
+  is correct — every doubt about receiver's own code is retired.
+- [project] Isolated the 295 hang by **controlled comparison**: held delivery.so (byte-identical),
+  receiver, and profile constant; swapped only the AppImage → getClient returns 1ms/268, hangs/295.
+  One-variable isolation turned 15 cycles of speculation into a one-line conclusion.
+- [process] **File-based diag was the turning point.** ui-host stderr is swallowed (#163); writing a
+  timestamped trail to /tmp showed "getClient(delivery_module)" with no return — ground truth that
+  ended the guessing. → extracted into `delivery-getclient-hang-295`.
+- [process] User redirects ("match stash↔storage / isolate the working workaround", "prove it on 268",
+  "no guesses, data") repeatedly broke me out of trial-and-error into measurement. Worth soliciting.
+
+### Fails
+- [process] Spent ~15 rebuild/restart cycles permuting init timing (sync / deferred / two-stage /
+  token-seed / version-match) BEFORE adding the file-diag that revealed getClient itself blocks.
+  Root cause: reasoned from downstream symptoms (spinner vs stuck) instead of instrumenting the actual
+  blocking call. Rule: when stderr is swallowed, file-diag the suspect call FIRST, before any rebuild.
+- [project] A two-instance port-60000 conflict (two delivery nodes) confounded the "deferred → discovery
+  stuck" reading mid-investigation → wasted a "two-instance was the cause" detour. Root cause: didn't
+  verify single-instance before concluding. Rule: assert instance count before reading IPC behavior.
+- [project] Chased a "delivery version mismatch" (receiver v0.1.1 vs platform 1.0.0) as the cause —
+  but metadata version is 1.0.0 on every tag; the git-tag pin never changes it. Root cause: conflated
+  git tag with metadata version without checking the running module's manifest.
+
 ## [win] 2026-06-11
 receiver_ui (new listen-only module) now **loads on the latest Basecamp (295)** and discovers the live
 Sneg "Logos manifesto" station over delivery_module.
