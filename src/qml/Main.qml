@@ -165,11 +165,14 @@ Item {
                     }
                     Switch {
                         id: hideSw
+                        padding: 0
+                        implicitWidth: 36; implicitHeight: 18
+                        Layout.preferredWidth: 36; Layout.preferredHeight: 18
+                        Layout.alignment: Qt.AlignVCenter
                         checked: root.hideCache
                         onToggled: if (backend) backend.setCacheHidden(checked)
                         indicator: Rectangle {
-                            implicitWidth: 36; implicitHeight: 18; radius: 9
-                            x: hideSw.leftPadding; y: hideSw.height / 2 - height / 2
+                            anchors.fill: parent; radius: 9
                             color: hideSw.checked ? root.accent : root.bgPrimary
                             border.color: hideSw.checked ? root.accent : root.borderColor; border.width: 1
                             Rectangle {
@@ -187,7 +190,7 @@ Item {
                 Rectangle {
                     Layout.alignment: Qt.AlignLeft
                     implicitWidth: 110; height: 28; radius: 4
-                    color: clearArea.containsMouse ? "#33373f" : root.bgPrimary
+                    color: clearArea.containsMouse ? root.bgActive : root.bgPrimary
                     border.color: root.borderColor; border.width: 1
                     Text { anchors.centerIn: parent; text: "Clear cache now"; color: root.textSecondary; font.pixelSize: 11 }
                     MouseArea {
@@ -226,13 +229,14 @@ Item {
                 anchors.fill: parent; anchors.margins: 6; clip: true; spacing: 4
                 model: root.stations()
                 delegate: Rectangle {
-                    width: list.width; height: 52; radius: 4
-                    color: rowArea.containsMouse ? "#22252b" : "transparent"
+                    width: list.width; height: 52; radius: 6
+                    color: rowArea.containsMouse ? root.bgActive : root.bgPrimary   // constant subtle bg, warm hover (no blue)
                     RowLayout {
-                        anchors.fill: parent; anchors.margins: 8; spacing: 10
-                        Rectangle { width: 8; height: 8; radius: 4; color: root.ok }
+                        anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: 8
+                        spacing: 16   // 16px between the status dot and the station name
+                        Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: root.ok; Layout.alignment: Qt.AlignVCenter }
                         ColumnLayout {
-                            Layout.fillWidth: true; spacing: 0
+                            Layout.fillWidth: true; spacing: 0; Layout.alignment: Qt.AlignVCenter
                             Text { text: modelData.name || "(unnamed)"; color: root.textPrimary; font.pixelSize: 13 }
                             Text {
                                 text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
@@ -242,7 +246,7 @@ Item {
                         Text {
                             text: (root.nowPlaying === modelData.name) ? "▶ playing" : "tap to play"
                             color: (root.nowPlaying === modelData.name) ? root.accent : root.textMuted
-                            font.pixelSize: 11
+                            font.pixelSize: 11; Layout.alignment: Qt.AlignVCenter
                         }
                     }
                     MouseArea {
@@ -270,11 +274,17 @@ Item {
             visible: root.nowPlaying.length > 0
             color: root.bgSecondary; border.color: root.accent; border.width: 1
             RowLayout {
-                anchors.fill: parent; anchors.margins: 10; spacing: 10
-                Text { text: "▶"; color: root.accent; font.pixelSize: 14 }
-                Text { text: root.nowPlaying; color: root.textPrimary; font.pixelSize: 13; Layout.fillWidth: true; elide: Text.ElideRight }
+                // leftMargin 14 aligns ▶ with the station-row dot (list margin 6 + row margin 8);
+                // rightMargin 18 keeps Stop off the edge and right-aligned with the rows' content.
+                anchors { fill: parent; leftMargin: 14; rightMargin: 18; topMargin: 8; bottomMargin: 8 }
+                spacing: 16
+                Text { text: "▶"; color: root.accent; font.pixelSize: 12; Layout.preferredWidth: 8
+                       horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter }
+                Text { text: root.nowPlaying; color: root.textPrimary; font.pixelSize: 13; Layout.fillWidth: true
+                       elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter }
                 Rectangle {
-                    width: 64; height: 26; radius: 4; color: stopArea.containsMouse ? "#33373f" : root.bgPrimary
+                    Layout.preferredWidth: 64; Layout.preferredHeight: 26; radius: 4; Layout.alignment: Qt.AlignVCenter
+                    color: stopArea.containsMouse ? root.bgActive : root.bgPrimary
                     border.color: root.borderColor; border.width: 1
                     Text { anchors.centerIn: parent; text: "Stop"; color: root.textSecondary; font.pixelSize: 11 }
                     MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true

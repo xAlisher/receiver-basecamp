@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Launch the RESERVED radio-only Basecamp: dedicated AppImage + minimal isolated profile
-# (delivery_module + receiver_ui only). Minimal profile avoids the platform QRO-allocator
-# degradation that makes getClient("delivery_module") hang in a busy multi-module profile
-# (see basecamp-skills: ipc-client-eager-init "permanent failure mode").
+# (delivery_module + receiver_ui only).
+#
+# ~/logos-basecamp-radio-only.AppImage is the **268 build (ef6dca8b)** — the one where delivery
+# getClient works end-to-end (discover + play). The latest 295 build hangs getClient("delivery_module")
+# (platform regression, logos-basecamp#150 / skill delivery-getclient-hang-295), so the demo runs on 268.
 #
 # DO NOT point other Basecamp work at ~/logos-basecamp-radio-only.AppImage or the
 # ~/.local/share/Logos-radio-only profile — they are reserved for the radio/receiver demo.

@@ -50,11 +50,12 @@ specific. Full skill: `basecamp-skills/delivery-getclient-hang-295`. (Exact line
 
 ## Reserved isolated environment (DO NOT touch from other work)
 
-- `~/logos-basecamp-radio-only.AppImage` (a duplicate of the 295 current) + profile
-  `~/.local/share/Logos-radio-only` — reserved for the receiver/radio demo. Launch:
-  `scripts/launch-radio-only.sh`. The 268 proof env: `~/logos-basecamp-khidr.AppImage` +
-  `~/.local/share/Logos-268-test`. Only ONE Basecamp runs at a time (separate profiles still share
-  delivery TCP port 60000 → two instances = conflict).
+- `~/logos-basecamp-radio-only.AppImage` is the **268 build (`ef6dca8b`)** — the one where receiver
+  works end-to-end (discover + play). (It was briefly a 295 copy; repointed to 268 since 295 hangs
+  getClient.) Profile `~/.local/share/Logos-radio-only`; launch `scripts/launch-radio-only.sh`.
+  `~/logos-basecamp-khidr.AppImage` is the same 268 (`ef6dca8b`). The latest **295** build is
+  `~/logos-basecamp-current.AppImage` (`2cb9985c`) — use it only to reproduce the getClient hang.
+  Only ONE Basecamp runs at a time (separate profiles still share delivery TCP port 60000 → conflict).
 
 ## Diagnostics
 
