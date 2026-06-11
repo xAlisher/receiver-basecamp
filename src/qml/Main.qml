@@ -238,7 +238,9 @@ Item {
                         spacing: 10   // gap between the status dot and the station name
                         Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: root.ok; Layout.alignment: Qt.AlignVCenter }
                         ColumnLayout {
-                            Layout.fillWidth: true; spacing: 0; Layout.alignment: Qt.AlignVCenter
+                            // NOTE: do NOT set Layout.alignment here — it silently disables Layout.fillWidth,
+                            // which collapses the column and lets the RowLayout scatter slack as a big dot↔name gap.
+                            Layout.fillWidth: true; spacing: 0
                             Text { text: modelData.name || "(unnamed)"; color: root.textPrimary; font.pixelSize: 13 }
                             Text {
                                 text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
@@ -246,7 +248,7 @@ Item {
                             }
                         }
                         Text {
-                            text: (root.nowPlaying === modelData.name) ? "▶ playing" : "tap to play"
+                            text: (root.nowPlaying === modelData.name) ? "playing" : "tap to play"
                             color: (root.nowPlaying === modelData.name) ? root.accent : root.textMuted
                             font.pixelSize: 11
                             horizontalAlignment: Text.AlignRight
