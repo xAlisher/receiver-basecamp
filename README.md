@@ -128,8 +128,10 @@ gdb backtrace needs `kernel.yama.ptrace_scope=0` (root); the kernel `wchan` need
 
 ## Platform / arch support
 
-- **linux-amd64** — provided as a prebuilt LGX in `dist/`.
-- **macOS/arm64** — supported by the code, but no prebuilt LGX yet; build from source with `nix`.
+- **linux-amd64** — prebuilt LGX: `dist/receiver_ui-0.1.0-linux-amd64.lgx`.
+- **macOS/arm64** — prebuilt LGX: `dist/receiver_ui-0.1.0-darwin-arm64.lgx` (built on Apple Silicon
+  2026-06-12; verified Mach-O **arm64** `.dylib` with `@rpath`-bundled Qt/boost/ssl — `delivery_module`'s
+  zerokit/RLN **does** build for `aarch64-darwin`). Install with `variant = darwin-arm64`.
 - Either way, the **268 platform caveat above applies** until #150 is fixed.
 
 ## Status & license
