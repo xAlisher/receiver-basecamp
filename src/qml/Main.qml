@@ -15,7 +15,7 @@ Item {
     // ── palette — matches radio_ui / keeper / stash ──
     readonly property color bgPrimary:    "#171717"
     readonly property color bgSecondary:  "#262626"
-    readonly property color bgActive:     "#332A27"
+    readonly property color bgActive:     "#2E2E2E"   // neutral hover-lift (was warm #332A27 — read as reddish)
     readonly property color borderColor:  "#383838"
     readonly property color textPrimary:  "#FFFFFF"
     readonly property color textSecondary:"#A4A4A4"
@@ -230,10 +230,12 @@ Item {
                 model: root.stations()
                 delegate: Rectangle {
                     width: list.width; height: 52; radius: 6
-                    color: rowArea.containsMouse ? root.bgActive : root.bgPrimary   // constant subtle bg, warm hover (no blue)
+                    // subtle neutral base (#1E1E1E ≈ half the contrast vs the panel); hover = the current
+                    // darker bg (#171717) — neutral inset, no reddish tint
+                    color: rowArea.containsMouse ? root.bgPrimary : "#1E1E1E"
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: 8
-                        spacing: 16   // 16px between the status dot and the station name
+                        spacing: 10   // gap between the status dot and the station name
                         Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: root.ok; Layout.alignment: Qt.AlignVCenter }
                         ColumnLayout {
                             Layout.fillWidth: true; spacing: 0; Layout.alignment: Qt.AlignVCenter
@@ -246,7 +248,9 @@ Item {
                         Text {
                             text: (root.nowPlaying === modelData.name) ? "▶ playing" : "tap to play"
                             color: (root.nowPlaying === modelData.name) ? root.accent : root.textMuted
-                            font.pixelSize: 11; Layout.alignment: Qt.AlignVCenter
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignRight
+                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                         }
                     }
                     MouseArea {
@@ -277,7 +281,7 @@ Item {
                 // leftMargin 14 aligns ▶ with the station-row dot (list margin 6 + row margin 8);
                 // rightMargin 18 keeps Stop off the edge and right-aligned with the rows' content.
                 anchors { fill: parent; leftMargin: 14; rightMargin: 18; topMargin: 8; bottomMargin: 8 }
-                spacing: 16
+                spacing: 10
                 Text { text: "▶"; color: root.accent; font.pixelSize: 12; Layout.preferredWidth: 8
                        horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter }
                 Text { text: root.nowPlaying; color: root.textPrimary; font.pixelSize: 13; Layout.fillWidth: true
