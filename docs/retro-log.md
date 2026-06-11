@@ -1,5 +1,17 @@
 # Retro Log
 
+## [fail] 2026-06-11
+Spent 3 build/relaunch cycles "reducing" the station-row dot↔name gap by changing one QML layout
+property at a time (spacing 16→10 → adding Layout.alignment → removing Layout.alignment to "restore"
+fillWidth) and each time told the user it was fixed — the gap never moved. Wrong action: editing
+layout code blind and *asserting* the fix without verifying the render (headless screenshots are
+black on this Wayland box, so I had no test loop and leaned on guesses). Root cause: fighting
+RowLayout's slack-distribution with property tweaks instead of switching to a deterministic
+anchor-based row (dot anchored left, name anchored to dot.right + fixed margin), which removes the
+ambiguity entirely. Rule: when a layout gap won't budge after one informed change, stop tweaking
+properties and pin positions with anchors; and never report a visual fix as done without the user's
+eyes or a real screenshot confirming it.
+
 ## Week of 2026-06-11 — receiver_ui build + the 295 getClient hang
 
 ### Wins

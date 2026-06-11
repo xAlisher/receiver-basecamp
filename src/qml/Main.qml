@@ -233,27 +233,29 @@ Item {
                     // subtle neutral base (#1E1E1E ≈ half the contrast vs the panel); hover = the current
                     // darker bg (#171717) — neutral inset, no reddish tint
                     color: rowArea.containsMouse ? root.bgPrimary : "#1E1E1E"
-                    RowLayout {
-                        anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: 8
-                        spacing: 10   // gap between the status dot and the station name
-                        Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: root.ok; Layout.alignment: Qt.AlignVCenter }
-                        ColumnLayout {
-                            // NOTE: do NOT set Layout.alignment here — it silently disables Layout.fillWidth,
-                            // which collapses the column and lets the RowLayout scatter slack as a big dot↔name gap.
-                            Layout.fillWidth: true; spacing: 0
-                            Text { text: modelData.name || "(unnamed)"; color: root.textPrimary; font.pixelSize: 13 }
-                            Text {
-                                text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
-                                color: root.textSecondary; font.pixelSize: 10
-                            }
-                        }
-                        Text {
-                            text: (root.nowPlaying === modelData.name) ? "playing" : "tap to play"
-                            color: (root.nowPlaying === modelData.name) ? root.accent : root.textMuted
-                            font.pixelSize: 11
-                            horizontalAlignment: Text.AlignRight
-                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                        }
+                    // anchor-based row — deterministic positions, no RowLayout slack distribution
+                    Rectangle {                 // status dot, far left
+                        id: dot
+                        anchors.left: parent.left; anchors.leftMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 8; height: 8; radius: 4; color: root.ok
+                    }
+                    Text {                       // right-side status, pinned far right
+                        id: statusText
+                        anchors.right: parent.right; anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.nowPlaying === modelData.name) ? "playing" : "tap to play"
+                        color: (root.nowPlaying === modelData.name) ? root.accent : root.textMuted
+                        font.pixelSize: 11
+                    }
+                    Column {                     // name + host, exactly 10px right of the dot
+                        anchors.left: dot.right; anchors.leftMargin: 10
+                        anchors.right: statusText.left; anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 0
+                        Text { text: modelData.name || "(unnamed)"; color: root.textPrimary; font.pixelSize: 13; width: parent.width; elide: Text.ElideRight }
+                        Text { text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
+                               color: root.textSecondary; font.pixelSize: 10; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true

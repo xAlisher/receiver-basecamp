@@ -6,7 +6,7 @@
   "description": "Receiver — discover and listen to decentralized Logos radio broadcasts over LogosMessaging. Listen-only (no hosting); runs on the latest Basecamp, Linux and macOS/arm.",
   "main": "receiver_ui_plugin",
   "view": "qml/Main.qml",
-  "icon": null,
+  "icon": "qml/receiver.png",
   "dependencies": ["delivery_module"],
 
   "nix": {
