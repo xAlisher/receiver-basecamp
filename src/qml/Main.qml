@@ -12,15 +12,16 @@ Item {
     readonly property var backend: (typeof logos !== "undefined" && logos.module)
                                    ? logos.module("receiver_ui") : null
 
-    // ── palette (self-contained, no design-system dependency) ──
-    readonly property color bgPrimary:    "#0e0f12"
-    readonly property color bgSecondary:  "#181a1f"
-    readonly property color borderColor:  "#2a2d34"
-    readonly property color textPrimary:  "#e8e8ea"
-    readonly property color textSecondary:"#9aa0aa"
-    readonly property color textMuted:    "#5c626c"
-    readonly property color accent:       "#ff5a00"
-    readonly property color ok:           "#36c26b"
+    // ── palette — matches radio_ui / keeper / stash ──
+    readonly property color bgPrimary:    "#171717"
+    readonly property color bgSecondary:  "#262626"
+    readonly property color bgActive:     "#332A27"
+    readonly property color borderColor:  "#383838"
+    readonly property color textPrimary:  "#FFFFFF"
+    readonly property color textSecondary:"#A4A4A4"
+    readonly property color textMuted:    "#5D5D5D"
+    readonly property color accent:       "#FF5000"
+    readonly property color ok:           "#22C55E"
     readonly property string monoFont:    "monospace"
 
     property bool settingsOpen: false
@@ -125,9 +126,23 @@ Item {
                     Slider {
                         id: bufSlider
                         Layout.fillWidth: true
+                        implicitHeight: 18
                         from: 2; to: 20; stepSize: 1
                         value: root.listenBuffer
                         onPressedChanged: if (!pressed && backend) backend.setBuffer(Math.round(value))
+                        background: Rectangle {
+                            x: bufSlider.leftPadding; y: bufSlider.topPadding + bufSlider.availableHeight / 2 - height / 2
+                            width: bufSlider.availableWidth; height: 4; radius: 2
+                            color: root.borderColor
+                            Rectangle { width: bufSlider.visualPosition * parent.width; height: parent.height; radius: 2; color: root.accent }
+                        }
+                        handle: Rectangle {
+                            x: bufSlider.leftPadding + bufSlider.visualPosition * (bufSlider.availableWidth - width)
+                            y: bufSlider.topPadding + bufSlider.availableHeight / 2 - height / 2
+                            implicitWidth: 14; implicitHeight: 14; radius: 7
+                            color: bufSlider.pressed ? "#CC4000" : root.accent
+                            border.color: root.bgPrimary; border.width: 2
+                        }
                     }
                     Text {
                         text: "Seconds behind live — rides out Tor latency so audio doesn't chop."
@@ -149,8 +164,21 @@ Item {
                         }
                     }
                     Switch {
+                        id: hideSw
                         checked: root.hideCache
                         onToggled: if (backend) backend.setCacheHidden(checked)
+                        indicator: Rectangle {
+                            implicitWidth: 36; implicitHeight: 18; radius: 9
+                            x: hideSw.leftPadding; y: hideSw.height / 2 - height / 2
+                            color: hideSw.checked ? root.accent : root.bgPrimary
+                            border.color: hideSw.checked ? root.accent : root.borderColor; border.width: 1
+                            Rectangle {
+                                x: hideSw.checked ? parent.width - width - 2 : 2
+                                y: 2; width: 14; height: 14; radius: 7; color: "#FFFFFF"
+                                Behavior on x { NumberAnimation { duration: 120 } }
+                            }
+                        }
+                        contentItem: Item {}   // label lives in the row text, not on the switch
                     }
                 }
 

@@ -96,30 +96,13 @@ void ReceiverUiPlugin::initLogos(LogosAPI* api)
     QObject::connect(m_pruneTimer, &QTimer::timeout, this, &ReceiverUiPlugin::pruneStations);
     m_pruneTimer->start();
 
-    // Get ONLY the delivery client SYNCHRONOUSLY here. Data: deferring getClient to a QTimer hung it
-    // hard (diag: "getClient(delivery_module)" with no return after 60s+). The working 2x4k build got
-    // the delivery client synchronously in initLogos (via LogosModules) and discovered. A single
-    // getClient is cheap (unlike the all-modules LogosModules that hung), so this shouldn't block the
-    // handshake. Only createNode/subscribe are deferred (the client needs a moment to be ready).
-    // PROVEN stash↔storage workaround for the getClient/IPC hang: pre-seed delivery_module's
-    // capability token in the process-wide TokenManager. Without it, getClient auto-provisions via
-    // capability_module.requestModule, which never completes here ("Failed to register token …
-    // delivery_module") → getClient blocks indefinitely (diag: "getClient(delivery_module)" with no
-    // return). Any non-empty token passes the (inverted-logic) server check (basecamp#150).
-    {
-        TokenManager& tm = TokenManager::instance();
-        if (tm.getToken(QStringLiteral("delivery_module")).isEmpty()) {
-            tm.saveToken(QStringLiteral("delivery_module"), QStringLiteral("receiver_bootstrap_v1"));
-            diag(QStringLiteral("initLogos: seeded delivery_module token"));
-        }
-    }
-
-    diag(QStringLiteral("initLogos: getClient(delivery_module) [sync]"));
-    m_delivery = m_logosAPI->getClient("delivery_module");
-    diag(QStringLiteral("initLogos: getClient -> %1").arg(m_delivery ? QStringLiteral("ok") : QStringLiteral("NULL")));
-    wireEvents();
-    QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire startDiscovery")); startDiscovery(); });
-    diag(QStringLiteral("initLogos EXIT"));
+    // Deferred getClient: do NOT getClient synchronously here. Returning from initLogos fast lets the
+    // view↔backend handshake complete, so the ui-host stays ALIVE even though getClient (in
+    // startDiscovery, below) then hangs on 295 — giving a STABLE hung process (no 2s handshake SIGKILL)
+    // whose blocking thread is observable (wchan/stack). startDiscovery seeds the token + getClient +
+    // wireEvents. (On 268 getClient returns instantly, so this also discovers + plays.)
+    QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire startDiscovery (deferred getClient)")); startDiscovery(); });
+    diag(QStringLiteral("initLogos EXIT (getClient deferred)"));
 }
 
 void ReceiverUiPlugin::wireEvents()
@@ -140,6 +123,9 @@ QString ReceiverUiPlugin::startDiscovery()
 {
     if (!m_delivery) {
         if (!m_logosAPI) return QStringLiteral("no_api");
+        { TokenManager& tm = TokenManager::instance();   // stash↔storage token-seed before getClient
+          if (tm.getToken(QStringLiteral("delivery_module")).isEmpty())
+              tm.saveToken(QStringLiteral("delivery_module"), QStringLiteral("receiver_bootstrap_v1")); }
         diag(QStringLiteral("startDiscovery: getClient(delivery_module)"));
         m_delivery = m_logosAPI->getClient("delivery_module");
         diag(QStringLiteral("startDiscovery: getClient -> %1").arg(m_delivery ? QStringLiteral("ok") : QStringLiteral("NULL")));
