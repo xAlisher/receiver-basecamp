@@ -592,6 +592,7 @@ QString ReceiverRelayPlugin::startDiscovery()
     if (m_deliveryObj) {
         m_delivery->onEvent(m_deliveryObj, "messageReceived",
             [this](const QString&, const QVariantList& data) {
+                qDebug() << "ReceiverRelayPlugin: EVENT messageReceived FIRED argc=" << data.size();  // DIAG
                 if (data.size() < 3) return;
                 ingestAnnounce(data[2].toString());  // data[2] = base64(payload)
             });
@@ -614,6 +615,8 @@ QString ReceiverRelayPlugin::addTopic(const QString& topic)
 void ReceiverRelayPlugin::ingestAnnounce(const QString& base64Payload)
 {
     const QByteArray json = QByteArray::fromBase64(base64Payload.toUtf8());  // single decode
+    qDebug() << "ReceiverRelayPlugin: ingestAnnounce b64len=" << base64Payload.size()
+             << "decoded=" << QString::fromUtf8(json).left(220);  // DIAG
     const QJsonObject o = QJsonDocument::fromJson(json).object();
     const QString path = o.value("path").toString();
     if (path.isEmpty()) return;
