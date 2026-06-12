@@ -11,30 +11,41 @@ loads, discovers the live Sneg "Logos manifesto" station over `delivery_module` 
 264-byte announce received over the logos.dev relay), and **plays it over Tor** (`torsocks ffplay`,
 PipeWire sink active = audible). The module/architecture is correct.
 
-## macOS/arm64 (2026-06-12): builds + loads, but CANNOT receive — platform event bug
+## macOS/arm64 (2026-06-12): WORKS end-to-end — discovery + .onion Tor playback
 
-Settled findings from the mac demo attempt (mac LogosBasecamp.app, Diana's host):
+**The earlier "CANNOT receive — platform event bug" verdict was WRONG (confounded).** It was measured on
+a Basecamp host whose cpp-sdk predated **#68** ("marshal provider events onto the source thread",
+2026-06-08). On a host built from logos-app `master` (cpp-sdk ≥ #68), the *same* `type:core` relay
+receives `messageReceived` **7/7 (100%)** on macOS. Root cause was a stale host SDK, not the platform.
+Full data: receiver-basecamp#5 + `research/delivery-on-mac/journal.md`. (Methodology fail that produced
+the wrong verdict: read "#79 symbol absent" from `strings`, which can't see C++ template instantiations —
+use `nm | c++filt`.)
 
-- **zerokit/RLN builds on `aarch64-darwin`** — the gating build unknown (#1) is resolved. `delivery_module`
-  pinned to `main` builds; `nix build .#lgx-portable` emits a `darwin-arm64` variant.
-- **`getClient` works on the mac platform** — no #150 hang here. The node peers, `createNode`/`start`/
-  `subscribe`/`send`/`getNodeInfo` all execute. Request/reply IPC is healthy.
-- **❌ Cross-module EVENTS never dispatch on mac.** `delivery_module` emits `messageReceived` (waku
-  healthy, 16–49 emits/run) but the consumer callback fires **0 times** — proven for BOTH a ui-host C++
-  backend AND a `type:core` relay in logos_host. The break is the `QRemoteObjectReplica` event delivery
-  over IPC (CFRunLoop / QTBUG-39488), not the host. **The core-relay workaround does NOT help.** delivery
-  has no poll API → no API-level receive path on mac until the platform/cpp-sdk fix ships. See
-  receiver-basecamp#4 (full evidence) and basecamp-skills `darwin-cross-module-event-ipc-broken`.
-- **Build C++ modules with `.#lgx-portable`, never `.#lgx`** — the dev variant `darwin-arm64-dev` ships
-  the plugin dylib only (no bundled boost/ssl, `/nix/store` linkage) and **silently won't load**. Portable
-  (`darwin-arm64`) bundles them and loads. (basecamp-skills `darwin-lgx-portable-required`.)
-- **Profile core modules load on demand** — a `type:core` module installed alone never constructs; it
-  loads when a consumer `getClient`s it or a ui module lists it as a dependency. Can't test one in
-  isolation. (basecamp-skills `darwin-core-module-on-demand-load`.)
+Settled findings:
 
-**Decision:** demo on Linux (event dispatch works there — proven on 268). The mac relay
-(`feat/mac-core-relay`) is a throwaway; revert to the normal ui_qml event consumer once the platform
-fix lands in an AppImage.
+- **zerokit/RLN builds on `aarch64-darwin`**; `nix build .#lgx-portable` emits a `darwin-arm64` variant.
+- **`getClient` + request/reply work on mac** (`createNode`/`start`/`subscribe`/`send`/`getNodeInfo`).
+- **✅ Cross-module EVENTS dispatch on mac with cpp-sdk ≥ #68.** The fix lives in the **host** binary
+  (`logos_host`/`ui-host` runs the source-side ModuleProxy). **No released Basecamp ships ≥#68 yet** (all
+  pin cpp-sdk ≤ 2026-04-22) → build `nix build github:logos-co/logos-app#bin-macos-app`. Verify a host has
+  it: `nm logos_host | c++filt | grep -c runOnOwnerThread` (>0). CFRunLoop/QTBUG-39488 is **rejected** for
+  the core path (core sidecars are headless, kqueue dispatcher). (basecamp-skills
+  `darwin-delivery-events-need-cpp-sdk-68`; the old `darwin-cross-module-event-ipc-broken` is deprecated.)
+- **.onion playback on mac uses a privoxy HTTP→SOCKS bridge, NOT torsocks** (LD_PRELOAD is SIP-blocked).
+  `#ifdef __APPLE__` in the relay spawns privoxy (forward-socks5t → listener tor SOCKS) + ffplay
+  `-http_proxy`. Linux keeps `torsocks ffplay`. (basecamp-skills `darwin-onion-playback-privoxy-bridge`; #7.)
+- **Build with `.#lgx-portable`, never `.#lgx`** (dev variant silently won't load — `darwin-lgx-portable-required`).
+- **Profile core modules load on demand** (only when a consumer/ui-dep pulls them — `darwin-core-module-on-demand-load`).
+- **delivery `createNode` is async** now: it returns an empty `LogosResult` immediately and signals
+  success via callback. The relay does NOT gate on the result (just proceeds to `subscribe`) — correct;
+  the workshop `voting` module gates on a sync success bool and bails (`deliveryStatus=3`). Stale-consumer hazard.
+- **delivery payload encoding drift:** on the #79 host `messageReceived` `data[2]` arrives as **raw**
+  announce JSON (base64 on linux-268). `ingestAnnounce` now parses JSON-first, base64-fallback (commit 6b5e907).
+
+**Architecture on mac:** the **relay arch** (this branch) — `receiver_relay` (core, receives in
+logos_host) + pure-QML `receiver_ui` (polls via `logos.callModule`). Shipped lgxs in `dist/`. Once a
+≥#68 GUI app is broadly available, the direct ui_qml C++ backend (top-level, `main`'s design) should also
+work — confirm the ui-host CFRunLoop path then (the one cell not measured headlessly).
 
 ## The blocker: getClient("delivery_module") hangs on 295 — a PLATFORM regression
 

@@ -91,3 +91,36 @@ Module: `~/basecamp/modules/receiver-basecamp`, branch `feat/milestone-2-deliver
 - [project] Tried to validate the relay **in isolation** (relay installed, ui disabled) and saw nothing —
   no construct, no log. Root cause: profile core modules load **on demand**; with no consumer asking for
   it, the relay never loads. → extracted `darwin-core-module-on-demand-load`.
+
+## Week of 2026-06-12 — delivery-on-mac: the confound, mac unblocked, onion playback fixed
+
+### Wins
+- [project] **Reversed the "mac is blocked" verdict with a controlled, single-variable test.** Prior
+  conclusion (research #4 + skill): cross-module delivery events never dispatch on mac (platform/CFRunLoop
+  bug, no workaround). Found the real cause: the failing host's cpp-sdk **predated #68** (the provider
+  event-marshal fix). Rebuilt the host from logos-app master (cpp-sdk ≥#68), re-ran the *same* relay →
+  `messageReceived` 7/7. The earlier "both hosts fail" was a stale-host artifact, not the platform.
+- [process] **logoscore as a headless cross-process test host bypassed the GUI TCC wall.** AppleScript
+  GUI automation is blocked over ssh (`-1719 not allowed assistive access`), so I couldn't drive the GUI
+  app. logoscore spawns the *same* logos_host sidecars (real cross-process QtRO IPC) headlessly →
+  faithful test of the core event path + privoxy playback, entirely over ssh.
+- [process] **trivial-experiment-first, twice, before building.** (a) Detected the fix in a binary with
+  `nm|c++filt`, not a rebuild. (b) Proved the privoxy→tor→onion playback path with a standalone
+  privoxy+ffprobe PoC *before* writing a line of plugin code — de-risked the whole #7 fix.
+- [project] **Mac now works end-to-end:** discovery + .onion Tor playback (privoxy bridge), verified in
+  the GUI (audible). Shipped darwin-arm64 lgxs + docs.
+
+### Fails
+- [process] **Read "#79 symbol absent" from `strings` and nearly treated it as evidence the old host
+  lacked the fix.** `strings` can't see C++ template instantiations; `runOnOwnerThread` only shows under
+  `nm | c++filt`. Root cause: used a text-scan tool for a symbol-table question. Rule: symbol-presence in
+  a binary → `nm`/`nm|c++filt`, never `strings`.
+- [process] **Assumed the mac `/Applications` app was diana's local build.** It was an older prebuilt
+  (TeamIdentifier unset, no source/result). Spent effort reasoning about its cpp-sdk before confirming
+  provenance. Rule: confirm a binary's provenance (result symlink / fix-symbol via nm) before reasoning
+  about which dependency version it carries.
+- [project] **A prior skill (`darwin-cross-module-event-ipc-broken`, critical) shipped a wrong root
+  cause** and would have steered future mac work to "give up / wait for a platform fix." Root cause: a
+  confounded measurement promoted to a CONFIRMED platform verdict without controlling the host build
+  version. Now deprecated + replaced (`darwin-delivery-events-need-cpp-sdk-68`). Rule: a cross-process
+  "it's the platform" verdict must control the dependency (cpp-sdk) version before it's CONFIRMED.
