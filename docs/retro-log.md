@@ -60,3 +60,34 @@ Earlier wins, same effort:
   crash — the crash is process identity (core sidecar lacks the token), not the module's `type:` label.
 
 Module: `~/basecamp/modules/receiver-basecamp`, branch `feat/milestone-2-delivery-init`.
+
+## Week of 2026-06-12 — mac demo attempt: the core-relay workaround, disproven
+
+### Wins
+- [project] **Proved the mac event-dispatch bug is host-agnostic** with one instrumented test, not
+  speculation. Hypothesis (research #4): ui-host can't receive delivery onEvent, but logos_host can →
+  put the consumer in a `type:core` relay. Built relay + pure-QML ui, ran it, and a qDebug at the relay's
+  event-lambda entry showed **49 delivery emits → 0 callbacks**. The QRO-replica IPC boundary, not the
+  host, is where the event dies. Closed the hypothesis with data and pivoted the demo to Linux.
+- [process] **One targeted probe beat more guessing.** "0 stations" was ambiguous (onEvent never fired
+  vs ingest rejected the payload). Added a single `qDebug` at the lambda's first line → settled it
+  instantly. trivial-experiment-first applied at the *diagnosis* step.
+- [project] Built `receiver_relay` (type:core) + a pure-QML `receiver_ui` (QtObject shim polling the
+  relay via `logos.callModule`) on **darwin-arm64** — the request/reply half of the pattern works on mac
+  (getClient, invokeRemoteMethod, createNode/start/subscribe all return).
+
+### Fails
+- [project] **Built the entire relay+ui workaround on an unproven load-bearing assumption.** Took
+  research #4's "ui-host-specific" framing as fact and never ran the cheap proof first — a ~10-line core
+  module that just logs whether it receives one delivery event on mac. That probe would have disproven
+  the premise *before* the relay scaffold, the pure-QML rewrite, two darwin builds, and the install
+  cycles. Root cause: trusted a hypothesis labeled "research" as settled; trivial-experiment-first says
+  probe the assumption the whole plan rests on, first.
+- [project] **Burned a build/install/relaunch cycle on the dev `.#lgx` variant.** Rebuilt the relay with
+  `nix build .#lgx` (→ `darwin-arm64-dev`, plugin dylib only, `/nix/store` linkage); it silently never
+  loaded ("clicking the icon doesn't open the module"). Root cause: didn't compare the install layout to
+  the *working* first install — the original used `.#lgx-portable` (bundled libboost/libssl/libcrypto).
+  Assumed `.#lgx` == "the build that worked." → extracted `darwin-lgx-portable-required`.
+- [project] Tried to validate the relay **in isolation** (relay installed, ui disabled) and saw nothing —
+  no construct, no log. Root cause: profile core modules load **on demand**; with no consumer asking for
+  it, the relay never loads. → extracted `darwin-core-module-on-demand-load`.

@@ -11,6 +11,31 @@ loads, discovers the live Sneg "Logos manifesto" station over `delivery_module` 
 264-byte announce received over the logos.dev relay), and **plays it over Tor** (`torsocks ffplay`,
 PipeWire sink active = audible). The module/architecture is correct.
 
+## macOS/arm64 (2026-06-12): builds + loads, but CANNOT receive — platform event bug
+
+Settled findings from the mac demo attempt (mac LogosBasecamp.app, Diana's host):
+
+- **zerokit/RLN builds on `aarch64-darwin`** — the gating build unknown (#1) is resolved. `delivery_module`
+  pinned to `main` builds; `nix build .#lgx-portable` emits a `darwin-arm64` variant.
+- **`getClient` works on the mac platform** — no #150 hang here. The node peers, `createNode`/`start`/
+  `subscribe`/`send`/`getNodeInfo` all execute. Request/reply IPC is healthy.
+- **❌ Cross-module EVENTS never dispatch on mac.** `delivery_module` emits `messageReceived` (waku
+  healthy, 16–49 emits/run) but the consumer callback fires **0 times** — proven for BOTH a ui-host C++
+  backend AND a `type:core` relay in logos_host. The break is the `QRemoteObjectReplica` event delivery
+  over IPC (CFRunLoop / QTBUG-39488), not the host. **The core-relay workaround does NOT help.** delivery
+  has no poll API → no API-level receive path on mac until the platform/cpp-sdk fix ships. See
+  receiver-basecamp#4 (full evidence) and basecamp-skills `darwin-cross-module-event-ipc-broken`.
+- **Build C++ modules with `.#lgx-portable`, never `.#lgx`** — the dev variant `darwin-arm64-dev` ships
+  the plugin dylib only (no bundled boost/ssl, `/nix/store` linkage) and **silently won't load**. Portable
+  (`darwin-arm64`) bundles them and loads. (basecamp-skills `darwin-lgx-portable-required`.)
+- **Profile core modules load on demand** — a `type:core` module installed alone never constructs; it
+  loads when a consumer `getClient`s it or a ui module lists it as a dependency. Can't test one in
+  isolation. (basecamp-skills `darwin-core-module-on-demand-load`.)
+
+**Decision:** demo on Linux (event dispatch works there — proven on 268). The mac relay
+(`feat/mac-core-relay`) is a throwaway; revert to the normal ui_qml event consumer once the platform
+fix lands in an AppImage.
+
 ## The blocker: getClient("delivery_module") hangs on 295 — a PLATFORM regression
 
 On the current pre-release (`2cb9985c`/295), `getClient("delivery_module")` **blocks forever** (ui-host

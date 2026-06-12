@@ -12,6 +12,24 @@ the latest **295** linux build hangs `getClient("delivery_module")` (platform re
 
 ---
 
+## ✅ RESOLVED (2026-06-12) — read this before following the steps
+
+This protocol was written before the mac run. Outcomes of the four assumptions:
+
+1. **zerokit/RLN builds on `aarch64-darwin`** — ✅ YES. `delivery_module` (pinned `main`) builds; not the blocker.
+2. **`.#lgx-portable` emits a `darwin-arm64` variant with bundled dylibs** — ✅ YES. **Use it, not `.#lgx`**
+   — the dev `.#lgx` (`darwin-arm64-dev`) ships no bundled libs and **silently won't load** for a C++ module.
+3. **Mac platform `getClient` hang?** — ✅ NO hang here; `getClient` + request/reply work fine on mac.
+4. **Tor playback?** — not reached; blocked by the real blocker below.
+
+**The real blocker (new):** cross-module **events** (`delivery_module messageReceived` via `onEvent`)
+**never dispatch on macOS** — in the ui-host AND in a `type:core` logos_host relay (49 emits → 0
+callbacks). It's the `QRemoteObjectReplica` IPC boundary (CFRunLoop / QTBUG-39488), and delivery has no
+poll API, so **there is no way to receive on mac** until the platform fix ships. Full evidence +
+decision: `../PROJECT_KNOWLEDGE.md` ("macOS/arm64") and issue #4. **Demo on Linux.**
+
+---
+
 ## Why this isn't already done
 
 The module-builder (`logos-module-builder`) **does** support Darwin — its `systems` include
