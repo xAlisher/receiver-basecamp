@@ -720,6 +720,7 @@ QString ReceiverRelayPlugin::announceOnce()
 
 void ReceiverRelayPlugin::killPlayer()
 {
+    killPlaybackProxy();   // macOS .onion bridge is tied to the player lifecycle (no-op on Linux/if absent)
     if (!m_player) return;
     m_player->terminate();
     if (!m_player->waitForFinished(2000)) m_player->kill();
@@ -734,6 +735,9 @@ QString ReceiverRelayPlugin::startFfplay()
     if (isOnionUrl(m_playingUrl)) {
         const QString te = ensureTorListen();
         if (!te.isEmpty()) return te;
+        // macOS: front the listener tor SOCKS with a privoxy HTTP bridge (receiver#7). No-op on Linux.
+        const QString pe = ensurePlaybackProxy();
+        if (!pe.isEmpty()) return pe;
     } else {
         killTorListen();  // switching to a clearnet stream — don't leave the listener tor running
     }
@@ -742,12 +746,19 @@ QString ReceiverRelayPlugin::startFfplay()
     dieWithParent(m_player);
     QProcessEnvironment env = cleanSpawnEnv();  // system ffplay/torsocks → system libs (AppImage trap)
     if (isOnionUrl(m_playingUrl)) {
+#ifdef __APPLE__
+        // macOS has no working torsocks (LD_PRELOAD/SIP). ffplay reaches the .onion through privoxy →
+        // listener tor SOCKS; -http_proxy is also set in buildPlayerCommand. http_proxy here covers the
+        // HLS manifest + every child segment. privoxy forwards ALL requests via tor (no IP/DNS leak).
+        env.insert("http_proxy", QStringLiteral("http://127.0.0.1:") + QString::number(m_playProxyPort));
+#else
         // Lock torsocks onto OUR tor SOCKS instance (Senty ISSUE-4) — without this, an overridden
         // RADIO_TOR_SOCKS_PORT leaves torsocks on its compiled-in 9050 default, so ffplay could hit
         // the wrong proxy or fail and fall back to a direct connection → listener IP leak.
         env.insert("TORSOCKS_TOR_ADDRESS", "127.0.0.1");
         env.insert("TORSOCKS_TOR_PORT", QString::number(m_listenSocksPort > 0 ? m_listenSocksPort : torSocksPort()));
         env.insert("TORSOCKS_ISOLATE_PID", "1");
+#endif
     }
     m_player->setProcessEnvironment(env);
     m_player->start(cmd.first, cmd.second);
@@ -779,13 +790,24 @@ QPair<QString, QStringList> ReceiverRelayPlugin::buildPlayerCommand(const QStrin
     // so playback rides out Tor latency spikes; -infbuf lets ffplay hold the read-ahead.
     if (m_listenBufferSec > 0)
         ffargs << "-live_start_index" << QString::number(-m_listenBufferSec);
-    ffargs << "-volume" << QString::number(m_volume) << url;
+    ffargs << "-volume" << QString::number(m_volume);
+#ifdef __APPLE__
+    // macOS: torsocks (LD_PRELOAD) is unusable under SIP. Route .onion playback through the local
+    // privoxy HTTP proxy (forward-socks5t → listener tor SOCKS) — ffmpeg honors -http_proxy for the
+    // HLS manifest and every child segment. (receiver#7; ensurePlaybackProxy set m_playProxyPort.)
+    if (isOnionUrl(url) && m_playProxyPort > 0)
+        ffargs << "-http_proxy" << (QStringLiteral("http://127.0.0.1:") + QString::number(m_playProxyPort));
+    ffargs << url;
+    return { ffplay, ffargs };
+#else
+    ffargs << url;
     // ffmpeg has no native SOCKS; route .onion playback through torsocks (LD_PRELOAD → tor SOCKS).
     if (isOnionUrl(url)) {
         const QString torsocks = resolveBin(QStringLiteral("torsocks"), "RADIO_TORSOCKS_BIN");
         return { torsocks, QStringList() << ffplay << ffargs };
     }
     return { ffplay, ffargs };
+#endif
 }
 
 bool ReceiverRelayPlugin::startTorProc(QProcess*& proc, const QString& dir, const QString& cfg, QString& errOut)
@@ -953,6 +975,73 @@ void ReceiverRelayPlugin::killTorListen()
     }
     if (!m_torListenDir.isEmpty()) { QDir(m_torListenDir).removeRecursively(); m_torListenDir.clear(); }
     m_listenSocksPort = 0;
+}
+
+// macOS .onion playback bridge (receiver#7): ffmpeg has no native SOCKS and torsocks (LD_PRELOAD) is
+// unusable under SIP, so front the listener tor SOCKS with a local privoxy HTTP proxy and point ffplay
+// at it via -http_proxy. On Linux this is a no-op (the torsocks path is used instead).
+QString ReceiverRelayPlugin::ensurePlaybackProxy()
+{
+#ifdef __APPLE__
+    if (m_playProxy && m_playProxy->state() == QProcess::Running) return QString();
+    const int socks = m_listenSocksPort > 0 ? m_listenSocksPort : torSocksPort();
+    m_playProxyDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                     + "/receiver_relay/playproxy-" + randomHex(4);
+    auto fail = [&](const QString& code) -> QString {
+        QDir(m_playProxyDir).removeRecursively(); m_playProxyDir.clear(); m_playProxyPort = 0; return code;
+    };
+    if (!QDir().mkpath(m_playProxyDir)) return fail(QStringLiteral("proxy_dir_failed"));
+    QFile::setPermissions(m_playProxyDir,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    // Loopback HTTP port for privoxy; offset off the SOCKS port to avoid colliding with it.
+    m_playProxyPort = socks + 1000;
+    const QString cfgPath = m_playProxyDir + "/privoxy.cfg";
+    // Minimal config — NO actionsfile/filterfile, so privoxy is a pure forwarder (no content filtering
+    // of the mpegts). forward-socks5t (trailing t) = REMOTE DNS, so the .onion resolves at the tor exit;
+    // the "/ … ." pattern forwards EVERY request through tor → no clearnet/DNS leak (mirrors torsocks).
+    QString cfg;
+    QTextStream s(&cfg);
+    s << "listen-address 127.0.0.1:" << m_playProxyPort << "\n"
+      << "forward-socks5t / 127.0.0.1:" << socks << " .\n";
+    QFile f(cfgPath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return fail(QStringLiteral("proxy_cfg_failed"));
+    f.write(cfg.toUtf8()); f.close();
+
+    const QString bin = resolveBin(QStringLiteral("privoxy"), "RADIO_PRIVOXY_BIN");
+    m_playProxy = new QProcess(this);
+    m_playProxy->setProcessChannelMode(QProcess::MergedChannels);
+    m_playProxy->setProcessEnvironment(cleanSpawnEnv());
+    dieWithParent(m_playProxy);
+    m_playProxy->start(bin, QStringList() << "--no-daemon" << cfgPath);
+    if (!m_playProxy->waitForStarted(5000)) {
+        const bool notFound = m_playProxy->error() == QProcess::FailedToStart;
+        qWarning() << "ReceiverRelayPlugin: privoxy failed to start:" << m_playProxy->errorString();
+        m_playProxy->deleteLater(); m_playProxy = nullptr;
+        return fail(notFound ? QStringLiteral("privoxy_not_found") : QStringLiteral("privoxy_start_failed"));
+    }
+    if (m_playProxy->waitForFinished(400)) {  // immediate exit ⇒ bad config or port already in use
+        qWarning() << "ReceiverRelayPlugin: privoxy exited immediately:" << m_playProxy->readAll();
+        m_playProxy->deleteLater(); m_playProxy = nullptr;
+        return fail(QStringLiteral("privoxy_port_in_use"));
+    }
+    return QString();
+#else
+    return QString();  // Linux uses torsocks; no bridge needed
+#endif
+}
+
+void ReceiverRelayPlugin::killPlaybackProxy()
+{
+#ifdef __APPLE__
+    if (m_playProxy) {
+        m_playProxy->terminate();
+        if (!m_playProxy->waitForFinished(3000)) m_playProxy->kill();
+        m_playProxy->deleteLater();
+        m_playProxy = nullptr;
+    }
+    if (!m_playProxyDir.isEmpty()) { QDir(m_playProxyDir).removeRecursively(); m_playProxyDir.clear(); }
+    m_playProxyPort = 0;
+#endif
 }
 
 // --- Test seams (not IPC API) ---

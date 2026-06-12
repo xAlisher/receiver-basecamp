@@ -112,7 +112,12 @@ private:
     void     killTorHost();
     void     killTorListen();
     void     pollOnionStatus();  // read .onion hostname + detect descriptor publish (bounded)
-    // ffplay invocation, routed through torsocks for .onion hosts. Returns {program, args}.
+    // macOS only: torsocks (LD_PRELOAD) doesn't work under SIP, so .onion playback routes ffplay
+    // through a local privoxy HTTP proxy that forwards to the listener tor SOCKS (receiver#7).
+    // No-op on Linux (which keeps the torsocks path). "" ok else an error code.
+    QString  ensurePlaybackProxy();
+    void     killPlaybackProxy();
+    // ffplay invocation: torsocks for .onion on Linux; plain ffplay + -http_proxy on macOS. {program, args}.
     QPair<QString, QStringList> buildPlayerCommand(const QString& url) const;
     int      torSocksPort() const { return port("RADIO_TOR_SOCKS_PORT", 9050); }
 
@@ -148,6 +153,10 @@ private:
     QString   m_playingStation, m_playingUrl;
     int       m_volume = 75;      // #13 0–100; applied via ffplay -volume
     int       m_listenBufferSec = 8;  // #17 listener jitter buffer (ffplay -live_start_index/-infbuf)
+    // macOS .onion playback bridge (receiver#7): privoxy HTTP proxy → listener tor SOCKS. Unused on Linux.
+    QProcess* m_playProxy = nullptr;
+    int       m_playProxyPort = 0;    // loopback HTTP port privoxy binds (ffplay -http_proxy target)
+    QString   m_playProxyDir;         // privoxy config + temp dir (0700)
 
     // Tor onion mode — separate host (HiddenService) + listener (SOCKS) processes (Senty ISSUE-2)
     QProcess* m_torHost = nullptr;     // SocksPort 0 + HiddenService (hosting in onion mode)
