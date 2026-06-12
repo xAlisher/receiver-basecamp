@@ -594,7 +594,7 @@ QString ReceiverRelayPlugin::startDiscovery()
             [this](const QString&, const QVariantList& data) {
                 qDebug() << "ReceiverRelayPlugin: EVENT messageReceived FIRED argc=" << data.size();  // DIAG
                 if (data.size() < 3) return;
-                ingestAnnounce(data[2].toString());  // data[2] = base64(payload)
+                ingestAnnounce(data[2].toString());  // data[2] = announce payload (raw JSON or base64; see ingestAnnounce)
             });
     }
     subscribeTopic(directoryTopic());
@@ -612,12 +612,18 @@ QString ReceiverRelayPlugin::addTopic(const QString& topic)
     return subscribeTopic(topic) ? ok() : err("subscribe_failed");
 }
 
-void ReceiverRelayPlugin::ingestAnnounce(const QString& base64Payload)
+void ReceiverRelayPlugin::ingestAnnounce(const QString& payload)
 {
-    const QByteArray json = QByteArray::fromBase64(base64Payload.toUtf8());  // single decode
-    qDebug() << "ReceiverRelayPlugin: ingestAnnounce b64len=" << base64Payload.size()
-             << "decoded=" << QString::fromUtf8(json).left(220);  // DIAG
-    const QJsonObject o = QJsonDocument::fromJson(json).object();
+    // delivery's messageReceived payload encoding drifts across platform builds: on linux-268 data[2]
+    // arrives base64-encoded (radio's proven single decode), but on the cpp-sdk #79 host — the build
+    // that actually dispatches events on macOS (research #5) — it arrives as the RAW announce JSON.
+    // Accept both: parse as JSON first, fall back to a single base64 decode only if that isn't JSON.
+    const QByteArray raw = payload.toUtf8();
+    QJsonObject o = QJsonDocument::fromJson(raw).object();
+    if (o.isEmpty())
+        o = QJsonDocument::fromJson(QByteArray::fromBase64(raw)).object();
+    qDebug() << "ReceiverRelayPlugin: ingestAnnounce len=" << payload.size()
+             << "name=" << o.value("name").toString();  // DIAG
     const QString path = o.value("path").toString();
     if (path.isEmpty()) return;
     if (!m_path.isEmpty() && path == m_path) return;                     // self-echo filter

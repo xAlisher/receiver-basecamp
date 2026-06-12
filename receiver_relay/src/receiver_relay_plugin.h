@@ -60,7 +60,7 @@ public:
 
     // Test/IPC seam (#5): decode + ingest a station announce. Called by the delivery_module
     // messageReceived handler and directly by tests/direct_test.cpp. Not part of the IPC API.
-    void ingestAnnounce(const QString& base64Payload);
+    void ingestAnnounce(const QString& payload);
 
     // #6 host announce. buildAnnouncePayload is a pure test seam; announceOnce gates on live
     // status then publishes (called by the #10 heartbeat timer and by tests). Not IPC API.
