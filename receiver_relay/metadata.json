@@ -1,0 +1,23 @@
+{
+  "name": "receiver_relay",
+  "version": "0.1.0",
+  "type": "core",
+  "category": "messaging",
+  "description": "Receiver discovery+playback relay (core module). Subscribes to delivery_module in logos_host — where cross-module onEvent events DO dispatch (the ui-host doesn't on mac; receiver-basecamp#4) — and exposes the live station list + Tor playback to receiver_ui via callModule.",
+  "main": "receiver_relay_plugin",
+  "dependencies": ["delivery_module"],
+
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": ["ffmpeg", "tor", "torsocks"]
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": ["Qt6 REQUIRED COMPONENTS Core Network"],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": ["Qt6::Core", "Qt6::Network"]
+    }
+  }
+}
