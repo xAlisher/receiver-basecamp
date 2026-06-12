@@ -9,7 +9,12 @@ the delivery client lives in the **ui-host** process. Interops with live `radio-
 
 ## ⚠️ READ THIS FIRST — which platform build to run
 
-**This module only *functions* on the 268-era Basecamp build (`ef6dca8b`). It does NOT work on the
+> **macOS users:** this caveat is about the **Linux direct-consumer** build. On **macOS** the module
+> uses the **relay architecture** and is **verified working on a current host** (cpp-sdk ≥ #68) — see
+> [**macOS (arm64)**](#macos-arm64--verified-working-relay-architecture) below. The 268/295 `getClient`
+> story does not apply there (`getClient` works on mac; the blocker was a stale host cpp-sdk, now fixed).
+
+**On Linux this module only *functions* on the 268-era Basecamp build (`ef6dca8b`). It does NOT work on the
 current/295 build (`2cb9985c`).**
 
 On 295, `getClient("delivery_module")` **hangs forever** (the ui-host thread parks in `poll()` waiting
@@ -27,6 +32,45 @@ Symptom on 295: the panel loads but discovery never starts ("initializing" / no 
 
 ➡️ **To actually use receiver, run it on a 268 AppImage.** When the platform regression is fixed
 (#150), it will work on later builds unchanged.
+
+---
+
+## macOS (arm64) — verified working (relay architecture)
+
+**Status (2026-06-12): discovery + Tor playback work end-to-end on macOS**, on a Basecamp host built
+with **cpp-sdk ≥ #68** (merged 2026-06-08). The earlier "delivery events never dispatch on mac" wall was
+**not** a platform limitation — it was a *stale host cpp-sdk*. cpp-sdk **#68** ("marshal provider events
+onto the source thread") makes cross-module `messageReceived` dispatch reliably on macOS. Full
+investigation + data: **[#5](https://github.com/xAlisher/receiver-basecamp/issues/5)** and
+[`research/delivery-on-mac/journal.md`](research/delivery-on-mac/journal.md).
+
+macOS uses the **relay architecture** (this branch): a `type:core` **`receiver_relay`** receives delivery
+in a `logos_host` sidecar (where events dispatch), and a **pure-QML** **`receiver_ui`** polls it via
+`logos.callModule`. `.onion` playback routes through a **privoxy** HTTP→SOCKS bridge in front of the
+listener Tor — macOS has no working `torsocks` (LD_PRELOAD is SIP-blocked;
+[#7](https://github.com/xAlisher/receiver-basecamp/issues/7)).
+
+**Host requirement.** A Basecamp app built from **logos-app `master`** (cpp-sdk ≥ #68). **No released
+build qualifies yet** (every release pins cpp-sdk ≤ 2026-04-22), so build one:
+`nix build github:logos-co/logos-app#bin-macos-app` and run that `.app`.
+
+**Runtime deps** (on PATH, or via `RADIO_*_BIN`): `nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy`
+— **not** `torsocks` (unused on mac).
+
+```bash
+PROF="$HOME/Library/Application Support/Logos/LogosBasecamp"
+for f in receiver_relay receiver_ui; do
+  lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" --allow-unsigned \
+       install --file "dist/${f}-0.1.0-darwin-arm64.lgx"
+done
+printf darwin-arm64 > "$PROF/modules/receiver_relay/variant"
+printf darwin-arm64 > "$PROF/plugins/receiver_ui/variant"
+```
+
+Launch the #68+ app, open **Receiver** in the sidebar → stations appear (~10–15s) → **Play**
+(first `.onion` play takes ~10–30s while the listener Tor bootstraps). If the GUI app's PATH lacks
+`~/.nix-profile/bin`, pass absolute bins:
+`open -n LogosBasecamp.app --env RADIO_PRIVOXY_BIN=$(which privoxy) --env RADIO_FFPLAY_BIN=$(which ffplay) --env RADIO_TOR_BIN=$(which tor)`.
 
 ---
 
@@ -73,11 +117,12 @@ direct URLs via `ffplay`.
 | OS | Install |
 |----|---------|
 | Linux (Debian/Ubuntu) | `sudo apt install -y tor torsocks ffmpeg` |
-| macOS | `brew install tor torsocks ffmpeg` |
+| macOS (arm64) | `nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy` — **privoxy, not torsocks** (`.onion` plays via the privoxy→Tor bridge; torsocks/LD_PRELOAD is SIP-blocked) |
 
-Bundling these inside the `.lgx` isn't possible yet — the portable bundler drops extra binaries
-([logos-module-builder#114](https://github.com/logos-co/logos-module-builder/issues/114)). Override
-paths with `RECEIVER_TOR_BIN` / `RECEIVER_TORSOCKS_BIN` / `RECEIVER_FFPLAY_BIN`.
+Bundling these inside the `.lgx` isn't fully landing yet — the portable bundler drops extra binaries
+([logos-module-builder#114](https://github.com/logos-co/logos-module-builder/issues/114)), so on mac the
+helpers are resolved from PATH. Override paths with `RADIO_TOR_BIN` / `RADIO_FFPLAY_BIN` /
+`RADIO_PRIVOXY_BIN` (Linux also: `RADIO_TORSOCKS_BIN`).
 
 ## What it does
 
@@ -128,11 +173,12 @@ gdb backtrace needs `kernel.yama.ptrace_scope=0` (root); the kernel `wchan` need
 
 ## Platform / arch support
 
-- **linux-amd64** — prebuilt LGX: `dist/receiver_ui-0.1.0-linux-amd64.lgx`.
-- **macOS/arm64** — prebuilt LGX: `dist/receiver_ui-0.1.0-darwin-arm64.lgx` (built on Apple Silicon
-  2026-06-12; verified Mach-O **arm64** `.dylib` with `@rpath`-bundled Qt/boost/ssl — `delivery_module`'s
-  zerokit/RLN **does** build for `aarch64-darwin`). Install with `variant = darwin-arm64`.
-- Either way, the **268 platform caveat above applies** until #150 is fixed.
+- **linux-amd64** — prebuilt LGX: `dist/receiver_ui-0.1.0-linux-amd64.lgx` (direct ui-host consumer; the
+  **268 caveat above applies** until #150 is fixed).
+- **macOS/arm64** — prebuilt **relay-architecture** pair: `dist/receiver_relay-0.1.0-darwin-arm64.lgx`
+  (core) + `dist/receiver_ui-0.1.0-darwin-arm64.lgx` (pure-QML). **Verified working end-to-end**
+  (discovery + `.onion` Tor playback) on a cpp-sdk ≥ #68 host — see the [macOS](#macos-arm64--verified-working-relay-architecture)
+  section. Install both with `variant = darwin-arm64`.
 
 ## Status & license
 
