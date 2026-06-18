@@ -1,5 +1,15 @@
 # Retro Log
 
+## [win] 2026-06-16 — non-destructive coexisting Basecamp launch (khidr demo)
+Added `scripts/launch-khidr.sh`: launches the 268 khidr build (radio + receiver + delivery) ISOLATED
+and alongside an already-running 295 instance — without killing it. The old `launch-radio-only.sh`
+opens with `pkill 'LogosBasecamp.elf|ui-host'` + `fusermount` + qmlcache wipe, which would have killed
+the instance the user was demoing live on a call. Keys to coexistence: separate `XDG_DATA_HOME` +
+`XDG_CACHE_HOME` + a `ss :60000` preflight (delivery's fixed port is the only true cross-profile
+collision; safe iff the live instance doesn't use delivery). `XDG_DATA_HOME` separates profiles on
+current builds where `LOGOS_DATA_DIR` is suspect. Both instances verified alive. → platform skill
+`basecamp-nondestructive-coexist-launch`. (Broadcaster/Liquidsoap side captured in radio-basecamp retro.)
+
 ## [fail] 2026-06-11
 Spent 3 build/relaunch cycles "reducing" the station-row dot↔name gap by changing one QML layout
 property at a time (spacing 16→10 → adding Layout.alignment → removing Layout.alignment to "restore"
