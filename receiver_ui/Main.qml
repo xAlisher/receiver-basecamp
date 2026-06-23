@@ -78,6 +78,11 @@ Item {
     property bool settingsOpen: false
     property var  events: []
 
+    // #9 caching-on-play: idle | caching | playing — Caching shows a countdown over the buffer secs
+    property string playPhase: "idle"
+    property int    cacheLeft:  0
+    readonly property color cachingYellow: "#d2a106"
+
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
     readonly property bool   discovering:  backend ? backend.discovering  : false
@@ -90,9 +95,36 @@ Item {
         try { return JSON.parse(backend.stationsJson) } catch (e) { return [] }
     }
 
+    // #9 — enter the Caching phase (countdown over the listener buffer), then flip to Playing.
+    function startPlay(url, name) {
+        if (!backend) return
+        backend.play(url, name)
+        root.playPhase = "caching"
+        root.cacheLeft = Math.max(1, root.listenBuffer)
+        cacheTimer.restart()
+    }
+    function stopPlay() {
+        if (backend) backend.stopPlayback()
+        root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
+    }
+
+    Timer {
+        id: cacheTimer; interval: 1000; repeat: true
+        onTriggered: {
+            if (root.cacheLeft > 0) root.cacheLeft--
+            if (root.cacheLeft <= 0) { root.playPhase = "playing"; cacheTimer.stop() }
+        }
+    }
+
     Connections {
         target: backend
         ignoreUnknownSignals: true
+        // external stop / relay reports stopped → leave the caching/playing phase
+        function onNowPlayingChanged() {
+            if (backend && backend.nowPlaying.length === 0 && root.playPhase !== "idle") {
+                root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
+            }
+        }
         function onActivity(line) {
             var next = root.events.slice()
             next.unshift("[" + Qt.formatTime(new Date(), "hh:mm:ss") + "] " + line)
@@ -295,8 +327,10 @@ Item {
                         id: statusText
                         anchors.right: parent.right; anchors.rightMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
-                        text: (root.nowPlaying === modelData.name) ? "playing" : "tap to play"
-                        color: (root.nowPlaying === modelData.name) ? root.accent : root.textMuted
+                        text: (root.nowPlaying === modelData.name)
+                              ? (root.playPhase === "caching" ? "caching…" : "playing") : "tap to play"
+                        color: (root.nowPlaying === modelData.name)
+                               ? (root.playPhase === "caching" ? root.cachingYellow : root.accent) : root.textMuted
                         font.pixelSize: 11
                     }
                     Column {                     // name + host, exactly 10px right of the dot
@@ -311,7 +345,7 @@ Item {
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: if (backend) backend.play(modelData.streamUrl, modelData.name)
+                        onClicked: root.startPlay(modelData.streamUrl, modelData.name)
                     }
                 }
 
@@ -327,20 +361,37 @@ Item {
             }
         }
 
-        // ── Player bar ──
+        // ── Player bar (#9: breathing-yellow Caching… countdown → orange Playing) ──
         Rectangle {
+            id: playerBar
             Layout.fillWidth: true; height: 44; radius: 6
             visible: root.nowPlaying.length > 0
-            color: root.bgSecondary; border.color: root.accent; border.width: 1
+            readonly property bool caching: root.playPhase === "caching"
+            color: root.bgSecondary; border.width: 1
+            border.color: playerBar.caching ? root.cachingYellow : root.accent
             RowLayout {
                 // leftMargin 14 aligns ▶ with the station-row dot (list margin 6 + row margin 8);
                 // rightMargin 18 keeps Stop off the edge and right-aligned with the rows' content.
                 anchors { fill: parent; leftMargin: 14; rightMargin: 18; topMargin: 8; bottomMargin: 8 }
                 spacing: 10
-                Text { text: "▶"; color: root.accent; font.pixelSize: 12; Layout.preferredWidth: 8
-                       horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter }
-                Text { text: root.nowPlaying; color: root.textPrimary; font.pixelSize: 13; Layout.fillWidth: true
-                       elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter }
+                Text {
+                    id: phaseSym
+                    text: playerBar.caching ? "◌" : "▶"
+                    color: playerBar.caching ? root.cachingYellow : root.accent
+                    font.pixelSize: 12; Layout.preferredWidth: 10
+                    horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
+                    SequentialAnimation {
+                        id: breathe; running: playerBar.caching; loops: Animation.Infinite
+                        NumberAnimation { target: phaseSym; property: "opacity"; from: 1.0; to: 0.35; duration: 600 }
+                        NumberAnimation { target: phaseSym; property: "opacity"; from: 0.35; to: 1.0; duration: 600 }
+                        onRunningChanged: if (!running) phaseSym.opacity = 1
+                    }
+                }
+                Text {
+                    text: playerBar.caching ? ("Caching… " + root.cacheLeft + "s · " + root.nowPlaying) : root.nowPlaying
+                    color: root.textPrimary; font.pixelSize: 13; Layout.fillWidth: true
+                    elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
+                }
                 Rectangle {
                     Layout.preferredWidth: 64; Layout.preferredHeight: 26; radius: 4; Layout.alignment: Qt.AlignVCenter
                     color: stopArea.containsMouse ? root.bgActive : root.bgPrimary
@@ -348,7 +399,7 @@ Item {
                     Text { anchors.centerIn: parent; text: "Stop"; color: root.textSecondary; font.pixelSize: 11 }
                     MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: if (backend) backend.stopPlayback() }
+                                onClicked: root.stopPlay() }
                 }
             }
         }
