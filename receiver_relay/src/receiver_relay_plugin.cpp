@@ -1083,7 +1083,7 @@ QString ReceiverRelayPlugin::setVolume(int percent)  // #13 — ffplay has no ru
 
 QString ReceiverRelayPlugin::setListenBuffer(int seconds)  // #17 — deeper buffer rides out Tor jitter
 {
-    m_listenBufferSec = qBound(0, seconds, 20);  // capped by the host playlist depth (24 × 1s)
+    m_listenBufferSec = qBound(0, seconds, 60);  // #11 UI max 60s; effective depth bounded by the host's HLS playlist
     if (m_player && m_player->state() != QProcess::NotRunning && !m_playingUrl.isEmpty())
         startFfplay();  // re-apply live; brief re-buffer gap
     return QString::fromUtf8(QJsonDocument(QJsonObject{{"ok", true}, {"bufferSec", m_listenBufferSec}})

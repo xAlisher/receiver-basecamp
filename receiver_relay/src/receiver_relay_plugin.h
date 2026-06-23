@@ -152,7 +152,7 @@ private:
     QProcess* m_player = nullptr;
     QString   m_playingStation, m_playingUrl;
     int       m_volume = 75;      // #13 0–100; applied via ffplay -volume
-    int       m_listenBufferSec = 8;  // #17 listener jitter buffer (ffplay -live_start_index/-infbuf)
+    int       m_listenBufferSec = 20;  // #17/#11 listener jitter buffer; ~20s baseline (ffplay -live_start_index/-infbuf)
     // macOS .onion playback bridge (receiver#7): privoxy HTTP proxy → listener tor SOCKS. Unused on Linux.
     QProcess* m_playProxy = nullptr;
     int       m_playProxyPort = 0;    // loopback HTTP port privoxy binds (ffplay -http_proxy target)

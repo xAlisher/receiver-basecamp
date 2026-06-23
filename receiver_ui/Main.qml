@@ -22,7 +22,7 @@ Item {
         property bool   nodeReady:   false
         property bool   discovering: false
         property string nowPlaying:  ""
-        property int    listenBuffer: 8
+        property int    listenBuffer: 20
         property bool   hideCache:   false
         property string stationsJson: "[]"
 
@@ -82,7 +82,7 @@ Item {
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
     readonly property bool   discovering:  backend ? backend.discovering  : false
     readonly property string nowPlaying:   backend ? backend.nowPlaying   : ""
-    readonly property int    listenBuffer: backend ? backend.listenBuffer : 8
+    readonly property int    listenBuffer: backend ? backend.listenBuffer : 20
     readonly property bool   hideCache:    backend ? backend.hideCache    : false
 
     function stations() {
@@ -178,7 +178,7 @@ Item {
                         id: bufSlider
                         Layout.fillWidth: true
                         implicitHeight: 18
-                        from: 2; to: 20; stepSize: 1
+                        from: 2; to: 60; stepSize: 1
                         value: root.listenBuffer
                         onPressedChanged: if (!pressed && backend) backend.setBuffer(Math.round(value))
                         background: Rectangle {
