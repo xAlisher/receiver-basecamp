@@ -88,7 +88,7 @@ void ReceiverUiPlugin::initLogos(LogosAPI* api)
 
     // cheap, no IPC — restore persisted settings (generated READONLY-PROP source-side setters)
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
-    setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 8).toInt(), 20));
+    setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s, ~20s default
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
 
     m_pruneTimer = new QTimer(this);
@@ -434,7 +434,7 @@ QString ReceiverUiPlugin::stopPlayback()
 
 QString ReceiverUiPlugin::setBuffer(int sec)
 {
-    sec = qBound(2, sec, 20);
+    sec = qBound(2, sec, 60);   // #11 ceiling 60s
     setListenBuffer(sec);   // generated PROP setter → auto-syncs to QML
     QSettings{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)}
         .setValue(QStringLiteral("listenBuffer"), sec);
