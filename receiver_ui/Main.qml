@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Logos.Theme  // logos-design-system (native on RC3+ Basecamp) — skill: logos-design-system-adoption
 
 // Receiver — discover & listen to decentralized Logos radio broadcasts (listen-only).
 //
@@ -64,15 +65,15 @@ Item {
     }
 
     // ── palette — matches radio_ui / keeper / stash ──
-    readonly property color bgPrimary:    "#171717"
-    readonly property color bgSecondary:  "#262626"
-    readonly property color bgActive:     "#2E2E2E"   // neutral hover-lift (was warm #332A27 — read as reddish)
-    readonly property color borderColor:  "#383838"
-    readonly property color textPrimary:  "#FFFFFF"
-    readonly property color textSecondary:"#A4A4A4"
-    readonly property color textMuted:    "#5D5D5D"
-    readonly property color accent:       "#FF5000"
-    readonly property color ok:           "#22C55E"
+    readonly property color bgPrimary:    Theme.palette.background
+    readonly property color bgSecondary:  Theme.palette.backgroundSecondary
+    readonly property color bgActive:     Theme.palette.surface   // neutral hover-lift (was warm #332A27 — read as reddish)
+    readonly property color borderColor:  Theme.palette.border
+    readonly property color textPrimary:  Theme.palette.text
+    readonly property color textSecondary:Theme.palette.textSecondary
+    readonly property color textMuted:    Theme.palette.textMuted
+    readonly property color accent:       Theme.palette.primary
+    readonly property color ok:           Theme.palette.success
     readonly property string monoFont:    "monospace"
 
     property bool settingsOpen: false
@@ -81,7 +82,7 @@ Item {
     // #9 caching-on-play: idle | caching | playing — Caching shows a countdown over the buffer secs
     property string playPhase: "idle"
     property int    cacheLeft:  0
-    readonly property color cachingYellow: "#d2a106"
+    readonly property color cachingYellow: Theme.palette.warning
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
