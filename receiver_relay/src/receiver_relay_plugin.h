@@ -144,6 +144,10 @@ private:
     bool            m_deliveryReachable = false;  // node answered getNodeInfo → pill green
     bool            m_discovering = false;
     QString         m_deliveryPeerId;
+    // Live relay-connectivity state from delivery_module's connectionStateChanged event:
+    // "Connected" | "PartiallyConnected" | "Disconnected". Empty until the first event arrives.
+    // Truthful + can fall back down — replaces the latched m_deliveryNodeUp for the status pill.
+    QString         m_connState;
     QTimer          m_deliveryHealth;   // periodic delivery_module reachability check
     QSet<QString>   m_subscribedTopics;
     QMap<QString, QJsonObject> m_stations;  // keyed by path; value carries "_lastSeen" ms (TTL → #11)

@@ -1,7 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Logos.Theme  // logos-design-system (native on RC3+ Basecamp) — skill: logos-design-system-adoption
+import Logos.Theme      // logos-design-system (native on RC3+ Basecamp) — skill: logos-design-system-adoption
+import Logos.Controls   // LogosText / LogosButton / LogosBadge / LogosSlider / LogosSwitch / LogosTextField
 
 // Receiver — discover & listen to decentralized Logos radio broadcasts (listen-only).
 //
@@ -22,6 +23,7 @@ Item {
         property string connectionStatus: "starting"
         property bool   nodeReady:   false
         property bool   discovering: false
+        property string peerId:      ""     // delivery node identity — surfaced in the header (cf. delivery-demo)
         property string nowPlaying:  ""
         property int    listenBuffer: 20
         property bool   hideCache:   false
@@ -53,9 +55,11 @@ Item {
         onTriggered: {
             var ds = backend.callParse("getDeliveryStatus", [])
             if (ds && ds.ok) {
-                backend.connectionStatus = ds.state || "…"
-                backend.nodeReady   = (ds.state === "connected" || ds.state === "ready")
-                backend.discovering = (ds.state !== "offline")
+                backend.connectionStatus = ds.state || "offline"
+                // granular delivery states: "offline"|"starting"|"Connected"|"PartiallyConnected"|"Disconnected"
+                backend.nodeReady   = (ds.state === "Connected" || ds.state === "PartiallyConnected")
+                backend.discovering = (ds.state === "Connected" || ds.state === "PartiallyConnected")
+                backend.peerId      = ds.peerId || ""
             }
             var st = backend.callParse("getStations", [])
             if (st && st.ok) backend.stationsJson = JSON.stringify(st.stations || [])
@@ -64,16 +68,20 @@ Item {
         }
     }
 
-    // ── palette — matches radio_ui / keeper / stash ──
+    // ── palette aliases — semantic Theme tokens, no hardcoded hex (skill: logos-design-system-adoption) ──
     readonly property color bgPrimary:    Theme.palette.background
     readonly property color bgSecondary:  Theme.palette.backgroundSecondary
-    readonly property color bgActive:     Theme.palette.surface   // neutral hover-lift (was warm #332A27 — read as reddish)
-    readonly property color borderColor:  Theme.palette.border
+    readonly property color bgActive:     Theme.palette.surface
+    readonly property color borderColor:  Theme.palette.borderHairline
     readonly property color textPrimary:  Theme.palette.text
     readonly property color textSecondary:Theme.palette.textSecondary
     readonly property color textMuted:    Theme.palette.textMuted
     readonly property color accent:       Theme.palette.primary
     readonly property color ok:           Theme.palette.success
+    readonly property color standby:      Theme.palette.warning          // node-ready-not-yet-discovering amber
+    readonly property color rowBase:      Theme.palette.surfaceRecessed  // recessed row inset inside the panel
+    // Monospace family for code-like values (topics, the buffer read-out, the activity trace). The
+    // design system ships no mono token, so keep the generic family here — Qt maps it to the platform font.
     readonly property string monoFont:    "monospace"
 
     property bool settingsOpen: false
@@ -85,6 +93,9 @@ Item {
     readonly property color cachingYellow: Theme.palette.warning
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
+    // delivery_module node state, verbatim from the relay: "offline" | "ready" | "connected".
+    readonly property string deliveryState: backend ? backend.connectionStatus : "offline"
+    readonly property string peerId:      backend ? backend.peerId       : ""
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
     readonly property bool   discovering:  backend ? backend.discovering  : false
     readonly property string nowPlaying:   backend ? backend.nowPlaying   : ""
@@ -138,46 +149,66 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 12
+        anchors.margins: Theme.spacing.medium
+        spacing: Theme.spacing.medium
 
-        // ── Header: title + status pills + cogwheel ──
+        // ── Header: title + status badge + cogwheel ──
         RowLayout {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: Theme.spacing.small
 
             ColumnLayout {
                 spacing: 0
-                Text { text: "Receiver"; color: root.textPrimary; font.pixelSize: 20; font.bold: true }
-                Text { text: "Discover & listen — decentralized radio"; color: root.textSecondary; font.pixelSize: 11 }
+                LogosText {
+                    text: "Receiver"
+                    font.pixelSize: Theme.typography.panelTitleText
+                    font.weight: Theme.typography.weightBold
+                }
+                LogosText {
+                    text: "Discover & listen — decentralized radio"
+                    color: root.textSecondary
+                    font.pixelSize: Theme.typography.secondaryText
+                }
+                // delivery node identity — surfaced like delivery-demo's "Peer ID:" row (mono, elided).
+                LogosText {
+                    visible: root.peerId.length > 0
+                    text: "node " + root.peerId
+                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                    elide: Text.ElideMiddle
+                    Layout.maximumWidth: 280; Layout.fillWidth: false
+                }
             }
             Item { Layout.fillWidth: true }
 
-            // status pill
-            Rectangle {
-                radius: 12; height: 24; implicitWidth: pillRow.implicitWidth + 20
-                color: root.bgSecondary; border.color: root.borderColor; border.width: 1
-                RowLayout {
-                    id: pillRow
-                    anchors.centerIn: parent; spacing: 6
-                    Rectangle {
-                        width: 8; height: 8; radius: 4
-                        color: root.discovering ? root.ok : (root.nodeReady ? "#d2a106" : root.textMuted)
-                    }
-                    Text {
-                        color: root.textSecondary; font.pixelSize: 11
-                        text: root.discovering ? "Discovering" : (root.nodeReady ? "Node ready" : root.status)
-                    }
-                }
+            // status badge — same design + logic as delivery-demo's LogosBadge, now on the delivery node's
+            // real, live connection state: Connected→success, PartiallyConnected→warning, Disconnected→error,
+            // and neutral textSecondary while starting / no node. (LogosBadge renders AllUppercase, so the
+            // source stays lowercase like delivery-demo.)
+            LogosBadge {
+                Layout.alignment: Qt.AlignVCenter
+                text:  root.deliveryState === "Connected"         ? "discovering"
+                     : root.deliveryState === "PartiallyConnected" ? "partial peers"
+                     : root.deliveryState === "Disconnected"       ? "disconnected"
+                     : root.deliveryState === "starting"           ? "connecting…"
+                     :                                               "no node"
+                color: root.deliveryState === "Connected"         ? root.ok
+                     : root.deliveryState === "PartiallyConnected" ? root.standby
+                     : root.deliveryState === "Disconnected"       ? Theme.palette.error
+                     : root.deliveryState === "starting"           ? root.standby
+                     :                                               root.textSecondary
             }
 
-            // cogwheel
+            // cogwheel — no gear icon asset ships with the module, so a tokenized custom toggle
+            // (LogosIconButton needs an iconSource url). Active state borders in the accent colour.
             Rectangle {
-                width: 28; height: 28; radius: 6
+                width: 28; height: 28; radius: Theme.spacing.radiusSmall
                 color: gearArea.containsMouse ? root.bgSecondary : "transparent"
                 border.color: root.settingsOpen ? root.accent : root.borderColor; border.width: 1
-                Text { anchors.centerIn: parent; text: "⚙"; font.pixelSize: 15
-                       color: root.settingsOpen ? root.accent : root.textSecondary }
+                LogosText {
+                    anchors.centerIn: parent; text: "⚙"
+                    font.pixelSize: Theme.typography.primaryText
+                    color: root.settingsOpen ? root.accent : root.textSecondary
+                }
                 MouseArea {
                     id: gearArea; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
@@ -190,47 +221,35 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             visible: root.settingsOpen
-            implicitHeight: setCol.implicitHeight + 20
-            color: root.bgSecondary; radius: 6; border.color: root.borderColor; border.width: 1
+            implicitHeight: setCol.implicitHeight + Theme.spacing.large
+            color: root.bgSecondary; radius: Theme.spacing.radiusMedium
+            border.color: root.borderColor; border.width: 1
 
             ColumnLayout {
                 id: setCol
-                anchors { top: parent.top; left: parent.left; right: parent.right; margins: 10 }
-                spacing: 10
+                anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.spacing.small }
+                spacing: Theme.spacing.small
 
                 // Listener buffer
                 ColumnLayout {
-                    Layout.fillWidth: true; spacing: 4
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
                     RowLayout {
                         Layout.fillWidth: true
-                        Text { text: "Listener buffer"; color: root.textSecondary; font.pixelSize: 11 }
+                        LogosText { text: "Listener buffer"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
                         Item { Layout.fillWidth: true }
-                        Text { text: root.listenBuffer + "s"; color: root.textPrimary; font.pixelSize: 11; font.family: root.monoFont }
+                        LogosText { text: root.listenBuffer + "s"; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont }
                     }
-                    Slider {
+                    LogosSlider {
                         id: bufSlider
                         Layout.fillWidth: true
-                        implicitHeight: 18
                         from: 2; to: 60; stepSize: 1
                         value: root.listenBuffer
                         onPressedChanged: if (!pressed && backend) backend.setBuffer(Math.round(value))
-                        background: Rectangle {
-                            x: bufSlider.leftPadding; y: bufSlider.topPadding + bufSlider.availableHeight / 2 - height / 2
-                            width: bufSlider.availableWidth; height: 4; radius: 2
-                            color: root.borderColor
-                            Rectangle { width: bufSlider.visualPosition * parent.width; height: parent.height; radius: 2; color: root.accent }
-                        }
-                        handle: Rectangle {
-                            x: bufSlider.leftPadding + bufSlider.visualPosition * (bufSlider.availableWidth - width)
-                            y: bufSlider.topPadding + bufSlider.availableHeight / 2 - height / 2
-                            implicitWidth: 14; implicitHeight: 14; radius: 7
-                            color: bufSlider.pressed ? "#CC4000" : root.accent
-                            border.color: root.bgPrimary; border.width: 2
-                        }
                     }
-                    Text {
+                    LogosText {
                         text: "Seconds behind live — rides out Tor latency so audio doesn't chop."
-                        color: root.textMuted; font.pixelSize: 10; Layout.fillWidth: true; wrapMode: Text.WordWrap
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
                     }
                 }
 
@@ -238,110 +257,87 @@ Item {
 
                 // Hide cache (privacy)
                 RowLayout {
-                    Layout.fillWidth: true; spacing: 8
+                    Layout.fillWidth: true; spacing: Theme.spacing.small
                     ColumnLayout {
                         Layout.fillWidth: true; spacing: 0
-                        Text { text: "Hide cache"; color: root.textPrimary; font.pixelSize: 12 }
-                        Text {
+                        LogosText { text: "Hide cache"; font.pixelSize: Theme.typography.primaryText }
+                        LogosText {
                             text: "Suppress + clear on-disk cache of streamed audio (privacy)."
-                            color: root.textMuted; font.pixelSize: 10; Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
                         }
                     }
-                    Switch {
+                    LogosSwitch {
                         id: hideSw
-                        padding: 0
-                        implicitWidth: 36; implicitHeight: 18
-                        Layout.preferredWidth: 36; Layout.preferredHeight: 18
                         Layout.alignment: Qt.AlignVCenter
                         checked: root.hideCache
                         onToggled: if (backend) backend.setCacheHidden(checked)
-                        indicator: Rectangle {
-                            anchors.fill: parent; radius: 9
-                            color: hideSw.checked ? root.accent : root.bgPrimary
-                            border.color: hideSw.checked ? root.accent : root.borderColor; border.width: 1
-                            Rectangle {
-                                x: hideSw.checked ? parent.width - width - 2 : 2
-                                y: 2; width: 14; height: 14; radius: 7; color: "#FFFFFF"
-                                Behavior on x { NumberAnimation { duration: 120 } }
-                            }
-                        }
-                        contentItem: Item {}   // label lives in the row text, not on the switch
                     }
                 }
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
 
-                Rectangle {
+                LogosButton {
                     Layout.alignment: Qt.AlignLeft
-                    implicitWidth: 110; height: 28; radius: 4
-                    color: clearArea.containsMouse ? root.bgActive : root.bgPrimary
-                    border.color: root.borderColor; border.width: 1
-                    Text { anchors.centerIn: parent; text: "Clear cache now"; color: root.textSecondary; font.pixelSize: 11 }
-                    MouseArea {
-                        id: clearArea; anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: if (backend) backend.clearCache()
-                    }
+                    text: "Clear cache now"
+                    implicitWidth: 140; implicitHeight: 32
+                    onClicked: if (backend) backend.clearCache()
                 }
             }
         }
 
         // ── Add a private topic ──
-        RowLayout {
-            Layout.fillWidth: true; spacing: 6
-            Rectangle {
-                Layout.fillWidth: true; height: 32; radius: 4
-                color: root.bgSecondary; border.color: root.borderColor; border.width: 1
-                TextField {
-                    id: topicField
-                    anchors.fill: parent; anchors.margins: 4; background: null
-                    color: root.textPrimary; font.pixelSize: 12
-                    placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
-                    placeholderTextColor: root.textMuted
-                    onAccepted: { if (backend && text.trim().length) { backend.addTopic(text.trim()); text = "" } }
-                }
+        LogosTextField {
+            id: topicField
+            Layout.fillWidth: true
+            placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
+        }
+        Connections {
+            target: topicField.textInput
+            function onAccepted() {
+                if (backend && topicField.text.trim().length) { backend.addTopic(topicField.text.trim()); topicField.text = "" }
             }
         }
 
         // ── Station list ──
         Rectangle {
             Layout.fillWidth: true; Layout.fillHeight: true
-            color: root.bgSecondary; radius: 6; border.color: root.borderColor; border.width: 1
+            color: root.bgSecondary; radius: Theme.spacing.radiusMedium
+            border.color: root.borderColor; border.width: 1
 
             ListView {
                 id: list
-                anchors.fill: parent; anchors.margins: 6; clip: true; spacing: 4
+                anchors.fill: parent; anchors.margins: Theme.spacing.tiny; clip: true; spacing: Theme.spacing.tiny
                 model: root.stations()
                 delegate: Rectangle {
-                    width: list.width; height: 52; radius: 6
-                    // subtle neutral base (#1E1E1E ≈ half the contrast vs the panel); hover = the current
-                    // darker bg (#171717) — neutral inset, no reddish tint
-                    color: rowArea.containsMouse ? root.bgPrimary : "#1E1E1E"
+                    width: list.width; height: 52; radius: Theme.spacing.radiusMedium
+                    // recessed row inset (surfaceRecessed, subtle vs the panel); hover lifts to the page bg
+                    color: rowArea.containsMouse ? root.bgPrimary : root.rowBase
                     // anchor-based row — deterministic positions, no RowLayout slack distribution
                     Rectangle {                 // status dot, far left
                         id: dot
-                        anchors.left: parent.left; anchors.leftMargin: 12
+                        anchors.left: parent.left; anchors.leftMargin: Theme.spacing.medium
                         anchors.verticalCenter: parent.verticalCenter
                         width: 8; height: 8; radius: 4; color: root.ok
                     }
-                    Text {                       // right-side status, pinned far right
+                    LogosText {                  // right-side status, pinned far right
                         id: statusText
-                        anchors.right: parent.right; anchors.rightMargin: 12
+                        anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
                         anchors.verticalCenter: parent.verticalCenter
                         text: (root.nowPlaying === modelData.name)
                               ? (root.playPhase === "caching" ? "caching…" : "playing") : "tap to play"
                         color: (root.nowPlaying === modelData.name)
                                ? (root.playPhase === "caching" ? root.cachingYellow : root.accent) : root.textMuted
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.typography.secondaryText
                     }
-                    Column {                     // name + host, exactly 10px right of the dot
-                        anchors.left: dot.right; anchors.leftMargin: 10
-                        anchors.right: statusText.left; anchors.rightMargin: 8
+                    Column {                     // name + host, exactly small-gap right of the dot
+                        anchors.left: dot.right; anchors.leftMargin: Theme.spacing.small
+                        anchors.right: statusText.left; anchors.rightMargin: Theme.spacing.small
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
-                        Text { text: modelData.name || "(unnamed)"; color: root.textPrimary; font.pixelSize: 13; width: parent.width; elide: Text.ElideRight }
-                        Text { text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
-                               color: root.textSecondary; font.pixelSize: 10; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
+                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
@@ -351,11 +347,11 @@ Item {
                 }
 
                 // empty state
-                Text {
+                LogosText {
                     anchors.centerIn: parent
                     visible: list.count === 0
                     horizontalAlignment: Text.AlignHCenter
-                    color: root.textMuted; font.pixelSize: 12
+                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
                     text: root.discovering ? "Listening for stations…\nnone announced yet"
                                            : "Starting discovery…"
                 }
@@ -365,21 +361,20 @@ Item {
         // ── Player bar (#9: breathing-yellow Caching… countdown → orange Playing) ──
         Rectangle {
             id: playerBar
-            Layout.fillWidth: true; height: 44; radius: 6
+            Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium
             visible: root.nowPlaying.length > 0
             readonly property bool caching: root.playPhase === "caching"
             color: root.bgSecondary; border.width: 1
             border.color: playerBar.caching ? root.cachingYellow : root.accent
             RowLayout {
-                // leftMargin 14 aligns ▶ with the station-row dot (list margin 6 + row margin 8);
-                // rightMargin 18 keeps Stop off the edge and right-aligned with the rows' content.
-                anchors { fill: parent; leftMargin: 14; rightMargin: 18; topMargin: 8; bottomMargin: 8 }
-                spacing: 10
-                Text {
+                anchors { fill: parent; leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium
+                          topMargin: Theme.spacing.small; bottomMargin: Theme.spacing.small }
+                spacing: Theme.spacing.small
+                LogosText {
                     id: phaseSym
                     text: playerBar.caching ? "◌" : "▶"
                     color: playerBar.caching ? root.cachingYellow : root.accent
-                    font.pixelSize: 12; Layout.preferredWidth: 10
+                    font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 10
                     horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
                     SequentialAnimation {
                         id: breathe; running: playerBar.caching; loops: Animation.Infinite
@@ -388,34 +383,31 @@ Item {
                         onRunningChanged: if (!running) phaseSym.opacity = 1
                     }
                 }
-                Text {
+                LogosText {
                     text: playerBar.caching ? ("Caching… " + root.cacheLeft + "s · " + root.nowPlaying) : root.nowPlaying
-                    color: root.textPrimary; font.pixelSize: 13; Layout.fillWidth: true
+                    font.pixelSize: Theme.typography.primaryText; Layout.fillWidth: true
                     elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
                 }
-                Rectangle {
-                    Layout.preferredWidth: 64; Layout.preferredHeight: 26; radius: 4; Layout.alignment: Qt.AlignVCenter
-                    color: stopArea.containsMouse ? root.bgActive : root.bgPrimary
-                    border.color: root.borderColor; border.width: 1
-                    Text { anchors.centerIn: parent; text: "Stop"; color: root.textSecondary; font.pixelSize: 11 }
-                    MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.stopPlay() }
+                LogosButton {
+                    text: "Stop"
+                    implicitWidth: 72; implicitHeight: 28
+                    Layout.alignment: Qt.AlignVCenter
+                    onClicked: root.stopPlay()
                 }
             }
         }
 
         // ── Activity log ──
         Rectangle {
-            Layout.fillWidth: true; height: 96; radius: 6
+            Layout.fillWidth: true; height: 96; radius: Theme.spacing.radiusMedium
             color: root.bgSecondary; border.color: root.borderColor; border.width: 1
             ColumnLayout {
-                anchors.fill: parent; anchors.margins: 8; spacing: 2
-                Text { text: "Activity"; color: root.textSecondary; font.pixelSize: 10 }
+                anchors.fill: parent; anchors.margins: Theme.spacing.small; spacing: Theme.spacing.tiny / 2
+                LogosText { text: "Activity"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                     model: root.events
-                    delegate: Text { text: modelData; color: root.textMuted; font.pixelSize: 10; font.family: root.monoFont }
+                    delegate: LogosText { text: modelData; color: root.textMuted; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont }
                 }
             }
         }

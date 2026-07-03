@@ -573,10 +573,13 @@ void ReceiverRelayPlugin::checkDeliveryHealth()
 QString ReceiverRelayPlugin::getDeliveryStatus()
 {
     const bool loaded = logosAPI && logosAPI->getClient("delivery_module") != nullptr;
-    // Green once delivery_module's node actually answers (reachable) or our own node is up.
-    const QString state = !loaded ? QStringLiteral("offline")
-                        : (m_deliveryReachable || m_deliveryNodeUp) ? QStringLiteral("connected")
-                                                                    : QStringLiteral("ready");
+    // Prefer the LIVE connectionStateChanged signal — it reflects real relay connectivity and can fall
+    // back down (Connected→PartiallyConnected→Disconnected), unlike the old latched m_deliveryNodeUp which
+    // pinned the pill green forever after startup. "starting" = node up, awaiting the first event.
+    const QString state = !loaded                   ? QStringLiteral("offline")
+                        : !m_connState.isEmpty()    ? m_connState                      // Connected|PartiallyConnected|Disconnected
+                        : m_deliveryNodeUp          ? QStringLiteral("starting")
+                                                    : QStringLiteral("offline");
     return QString::fromUtf8(QJsonDocument(QJsonObject{
         {"ok", true}, {"state", state}, {"peerId", m_deliveryPeerId}
     }).toJson(QJsonDocument::Compact));
@@ -595,6 +598,16 @@ QString ReceiverRelayPlugin::startDiscovery()
                 qDebug() << "ReceiverRelayPlugin: EVENT messageReceived FIRED argc=" << data.size();  // DIAG
                 if (data.size() < 3) return;
                 ingestAnnounce(data[2].toString());  // data[2] = announce payload (raw JSON or base64; see ingestAnnounce)
+            });
+        // Live relay-connectivity health for the status pill. delivery_module maps its raw
+        // connection_status_change → the "connectionStateChanged" event with data[0] =
+        // "Connected" | "PartiallyConnected" | "Disconnected" (delivery_module_plugin.cpp).
+        m_delivery->onEvent(m_deliveryObj, "connectionStateChanged",
+            [this](const QString&, const QVariantList& data) {
+                if (!data.isEmpty()) {
+                    m_connState = data[0].toString();
+                    qDebug() << "ReceiverRelayPlugin: EVENT connectionStateChanged →" << m_connState;  // DIAG
+                }
             });
     }
     subscribeTopic(directoryTopic());
