@@ -7,31 +7,29 @@ the delivery client lives in the **ui-host** process. Interops with live `radio-
 
 ---
 
-## ⚠️ READ THIS FIRST — which platform build to run
+## ✅ Platform status — works on v0.2.0 (current)
 
-> **macOS users:** this caveat is about the **Linux direct-consumer** build. On **macOS** the module
-> uses the **relay architecture** and is **verified working on a current host** (cpp-sdk ≥ #68) — see
-> [**macOS (arm64)**](#macos-arm64--verified-working-relay-architecture) below. The 268/295 `getClient`
-> story does not apply there (`getClient` works on mac; the blocker was a stale host cpp-sdk, now fixed).
+> **macOS users:** on **macOS** the module uses the **relay architecture** and is **verified working**
+> on a current host (cpp-sdk ≥ #68) — see [**macOS (arm64)**](#macos-arm64--verified-working-relay-architecture)
+> below. `getClient` works on mac; the blocker there was only a stale host cpp-sdk, long fixed.
 
-**On Linux this module only *functions* on the 268-era Basecamp build (`ef6dca8b`). It does NOT work on the
-current/295 build (`2cb9985c`).**
+**On Linux this module works on the current Basecamp build (`v0.2.0`, verified 2026-07-04):** discovery
+starts, the delivery node connects, and the design-system UI renders. The old **268-only** restriction is
+**lifted** — the v0.2 platform migration resolved the `getClient("delivery_module")` hang that used to
+park pre-v0.2 (295-era) builds. Just run it on a current `v0.2.0` AppImage.
 
-On 295, `getClient("delivery_module")` **hangs forever** (the ui-host thread parks in `poll()` waiting
-for a capability/QRO reply that never arrives) — a **platform regression**, not a bug in this module
-or in `delivery_module` (the delivery binary is byte-identical on both builds and works on 268).
-Symptom on 295: the panel loads but discovery never starts ("initializing" / no stations).
+<details><summary>Historical — the pre-v0.2 "268-only" <code>getClient</code> hang (resolved)</summary>
 
-- Tracked upstream: **[logos-basecamp#150](https://github.com/logos-co/logos-basecamp/issues/150)**
-  (platform root — third-party `getClient`/capability bootstrap) and
-  **[logos-delivery-module#31](https://github.com/logos-co/logos-delivery-module/issues/31)**
-  (consumer-side write-up + the `wchan` capture).
-- Proof: same module + **byte-identical `delivery_module.so` (`d872f77c`)** + same minimal profile →
-  `getClient` returns in ~1 ms on 268, hangs on 295. Only the AppImage differs.
-- `getClient("storage_module")` works on 295, so it is delivery-specific.
+Before v0.2, `getClient("delivery_module")` **hung forever** on the 295-era build (`2cb9985c`) — the
+ui-host thread parked in `poll()` waiting for a capability/QRO reply that never arrived. A
+delivery-specific platform regression (`getClient("storage_module")` worked), tracked as
+**[logos-basecamp#150](https://github.com/logos-co/logos-basecamp/issues/150)** /
+**[logos-delivery-module#31](https://github.com/logos-co/logos-delivery-module/issues/31)**. Proof at
+the time: same module + byte-identical `delivery_module.so` (`d872f77c`) + same profile → `getClient`
+returned in ~1 ms on the 268 build (`ef6dca8b`), hung on 295; only the AppImage differed. The module was
+pinned to 268 until the v0.2 bootstrap fix. Kept for archaeology.
 
-➡️ **To actually use receiver, run it on a 268 AppImage.** When the platform regression is fixed
-(#150), it will work on later builds unchanged.
+</details>
 
 ---
 
@@ -80,9 +78,9 @@ Launch the #68+ app, open **Receiver** in the sidebar → stations appear (~10�
 # 0. Runtime deps on PATH (playback helpers — see "Runtime dependencies" below)
 sudo apt install -y tor torsocks ffmpeg
 
-# 1. Get a 268 Basecamp AppImage (the build where delivery getClient works).
-#    On this machine it's already at ~/logos-basecamp-radio-only.AppImage (== ef6dca8b).
-#    sha256 must start ef6dca8b. The latest ~/logos-basecamp-current.AppImage (2cb9985c/295) will NOT work.
+# 1. Use a current Basecamp AppImage (v0.2.0+ — delivery getClient works since the v0.2 migration).
+#    On this machine: ~/logos-basecamp-current.AppImage (-> v0.2.0). The old 268-only pin is lifted;
+#    pre-v0.2 (295-era) builds hung getClient — see the "Platform status" section above.
 
 # 2. Use a MINIMAL ISOLATED profile (delivery_module + receiver_ui only) to keep startup fast.
 export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
@@ -173,8 +171,8 @@ gdb backtrace needs `kernel.yama.ptrace_scope=0` (root); the kernel `wchan` need
 
 ## Platform / arch support
 
-- **linux-amd64** — prebuilt LGX: `dist/receiver_ui-0.1.0-linux-amd64.lgx` (direct ui-host consumer; the
-  **268 caveat above applies** until #150 is fixed).
+- **linux-amd64** — prebuilt LGX: `dist/receiver_ui-0.1.0-linux-amd64.lgx` (direct ui-host consumer;
+  **works on the current `v0.2.0` build** — the 268 pin is lifted, see "Platform status" above).
 - **macOS/arm64** — prebuilt **relay-architecture** pair: `dist/receiver_relay-0.1.0-darwin-arm64.lgx`
   (core) + `dist/receiver_ui-0.1.0-darwin-arm64.lgx` (pure-QML). **Verified working end-to-end**
   (discovery + `.onion` Tor playback) on a cpp-sdk ≥ #68 host — see the [macOS](#macos-arm64--verified-working-relay-architecture)
@@ -182,5 +180,6 @@ gdb backtrace needs `kernel.yama.ptrace_scope=0` (root); the kernel `wchan` need
 
 ## Status & license
 
-Discovery + Tor playback validated **end-to-end on 268** (discovers a live `radio-basecamp` station and
-plays it). Blocked on 295 solely by the platform `getClient` regression (#150). License: MIT or Apache-2.0.
+Discovery + Tor playback validated **end-to-end** (discovers a live `radio-basecamp` station and plays
+it), originally on 268 and now on the current **`v0.2.0`** build — the v0.2 migration resolved the
+`getClient` regression (#150) that had pinned it to 268. License: MIT or Apache-2.0.
