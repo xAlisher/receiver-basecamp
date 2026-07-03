@@ -1,6 +1,6 @@
 {
   "name": "receiver_ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "ui_qml",
   "category": "messaging",
   "description": "Receiver — discover and listen to decentralized Logos radio broadcasts over LogosMessaging. Listen-only (no hosting); runs on the latest Basecamp, Linux and macOS/arm.",
