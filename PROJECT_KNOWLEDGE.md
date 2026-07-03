@@ -4,6 +4,25 @@ Accumulated wisdom. Patterns, pitfalls, proven facts. (Raw captures live in `doc
 
 ---
 
+## Phase 2 roadmap — Identity & Scaling (pointer, 2026-06-23)
+
+The canonical, prioritized plan for the next epic lives in **radio-basecamp**
+(`docs/plans/radio-implementation.md` → *Phase 2 — Identity & Scaling roadmap*) — it's cross-module and
+anchored on radio's station signing key, so it's tracked there. receiver's three issues in that plan:
+
+- **#13 — verify station identity by pubkey, not name** (P2.1a) — depends on radio#24 (signed announces).
+- **#14 — pin a station + background desktop notification when it's live again** (P2.1b) — depends on #13;
+  gated on a `trivial-experiment-first` check that Basecamp keeps the relay/core module alive with no panel
+  focused (relates to the orphaned-playback lifecycle issues #2/#10).
+- **#15 — restream on your own .onion + announce as a mirror** (P2.3a) → **#16 — aggregate endpoints by
+  identity + select best, with failover** (P2.3b) — the scaling mesh; depend on radio#25 (signed media
+  digests) + radio#24. The BRIEF's "origin uplink is the scaling limit" Phase-2 path.
+
+Order: identity theme (radio#24 → #13 → #14) ships first as the cheap win; scaling mesh (radio#25 → #15 →
+#16) follows, with the radio#25 spike pulled forward as the riskiest unknown.
+
+---
+
 ## What works (proven end-to-end, 2026-06-11)
 
 receiver_ui (single `ui_qml` module + C++ backend) **works fully on the 268 build** (`ef6dca8b`):
@@ -47,9 +66,17 @@ logos_host) + pure-QML `receiver_ui` (polls via `logos.callModule`). Shipped lgx
 ≥#68 GUI app is broadly available, the direct ui_qml C++ backend (top-level, `main`'s design) should also
 work — confirm the ui-host CFRunLoop path then (the one cell not measured headlessly).
 
-## The blocker: getClient("delivery_module") hangs on 295 — a PLATFORM regression
+## ✅ RESOLVED (v0.2.0, 2026-07-04): the getClient hang is gone — receiver works on the current build
 
-On the current pre-release (`2cb9985c`/295), `getClient("delivery_module")` **blocks forever** (ui-host
+The v0.2 platform migration fixed the getClient/capability bootstrap (logos-basecamp#150). On the
+current **`v0.2.0`** AppImage the DIRECT ui_qml consumer runs end-to-end: discovery starts, the delivery
+node connects (verified `connectionStateChanged` transitions `Disconnected→Connected` in the run log),
+and the design-system UI renders. **The 268-only pin is lifted.** The section below is pre-v0.2 history;
+the *diagnosis method* (controlled AppImage swap + file-diag the blocking call) is the reusable part.
+
+## The blocker: getClient("delivery_module") hangs on 295 — a PLATFORM regression (pre-v0.2, RESOLVED)
+
+On the pre-v0.2 pre-release (`2cb9985c`/295), `getClient("delivery_module")` **blocked forever** (ui-host
 stays alive, event loop frozen → view handshake times out → permanent spinner / "stuck initializing").
 The identical call returns in **1 ms on 268**. Isolated by controlled comparison — same
 `delivery_module.so` (byte-identical `d872f77c`), same receiver, same minimal profile, same machine;
@@ -76,6 +103,35 @@ specific. Full skill: `basecamp-skills/delivery-getclient-hang-295`. (Exact line
 - `setBackend(this)` FIRST in initLogos (view source ready → fast handshake), then the delivery work.
 - `delivery_module` pinned to **main** in `flake.nix` (the zerokit/RLN nix build fix, delivery #49,
   unblocks the v0.1.2 `zerokit-2.0.2` crates.io-403 that forced an earlier v0.1.1 pin).
+
+## Two Main.qml — which one ships (READ before editing the view)
+
+This repo carries **two** views for two architectures. Editing the wrong one = zero visible effect.
+- **`src/qml/Main.qml` — DIRECT backend, THE ONE THAT BUILDS.** `metadata.json` `view: "qml/Main.qml"`
+  (src-layout) → `nix build .#lgx` / `nix run .` bundle this. Binds a C++ QRO backend via
+  `logos.module("receiver_ui")` (PROPs auto-sync, SLOTs direct, SIGNALs via `Connections`). Backend =
+  `src/receiver_ui_plugin.cpp`, interface = `src/receiver_ui.rep`. **The only supported shape**
+  (delivery-core-consume-crash).
+- **`receiver_ui/Main.qml` — RELAY variant, mac-only.** Pure-QML driving a `type:core` `receiver_relay`
+  via `logos.callModule` (feat/mac-core-relay). Built by no build file on feat/design-system-ui.
+
+Branch keeps both in sync (develop on relay → port to DIRECT). Skill:
+`basecamp-skills/verify-which-main-qml-the-build-bundles`. Verify with
+`grep view metadata.json` + reading the Main.qml inside the built plugin dir.
+
+## Design-system UI (#17) + live connection pill (2026-07-04)
+
+- **Full logos-design-system adoption** in `src/qml/Main.qml`: LogosText/LogosButton/LogosBadge/
+  LogosSlider/LogosSwitch/LogosTextField + `Theme.typography`/`Theme.spacing` tokens, zero raw hex.
+  RC3+ Basecamp provides the design system natively — just `import Logos.Theme` / `Logos.Controls`,
+  bundle nothing. `nix run .` resolves both standalone (its harness spins a real Logos host).
+- **Status pill is truthful now.** Old code latched `connectionStatus` at "connecting" / the relay
+  latched `m_deliveryNodeUp=true` forever → pill stuck green after startup, could never warn on a drop.
+  Fixed: subscribe to delivery_module's **`connectionStateChanged`** event (`data[0]` =
+  Connected|PartiallyConnected|Disconnected) and drive the pill live — success/warning/error, delivery-
+  demo's logic. Skill: `basecamp-skills/delivery-connection-state-pill`.
+- **Op note:** kill Basecamp/standalone by PID (`pgrep -f … | grep -vw $$`), never `pkill -f <str>`
+  where the string is in your own command — it self-SIGTERMs (exit 144) and half-kills the host.
 
 ## Playback (lifted from radio, works)
 
