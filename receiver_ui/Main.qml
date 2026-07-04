@@ -320,15 +320,34 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 8; height: 8; radius: 4; color: root.ok
                     }
-                    LogosText {                  // right-side status, pinned far right
+                    // #19: right-side control — a perfect-round ▶ play button (idle) or the
+                    // status label (playing/caching). Circle fills accent on hover.
+                    Item {
                         id: statusText
                         anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
                         anchors.verticalCenter: parent.verticalCenter
-                        text: (root.nowPlaying === modelData.name)
-                              ? (root.playPhase === "caching" ? "caching…" : "playing") : "tap to play"
-                        color: (root.nowPlaying === modelData.name)
-                               ? (root.playPhase === "caching" ? root.cachingYellow : root.accent) : root.textMuted
-                        font.pixelSize: Theme.typography.secondaryText
+                        readonly property bool active: (root.nowPlaying === modelData.name)
+                        width: active ? lbl.implicitWidth : 26
+                        height: 26
+                        Rectangle {                     // circular play button (idle)
+                            visible: !statusText.active
+                            anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                            color: rowArea.containsMouse ? root.accent : "transparent"
+                            border.width: 1; border.color: rowArea.containsMouse ? root.accent : root.borderColor
+                            LogosText {
+                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1  // optical: nudge ▶ right
+                                text: "▶"; font.pixelSize: Theme.typography.secondaryText
+                                color: rowArea.containsMouse ? root.bgPrimary : root.textMuted
+                            }
+                        }
+                        LogosText {                     // status label (playing / caching)
+                            id: lbl
+                            visible: statusText.active
+                            anchors.centerIn: parent
+                            text: root.playPhase === "caching" ? "caching…" : "playing"
+                            color: root.playPhase === "caching" ? root.cachingYellow : root.accent
+                            font.pixelSize: Theme.typography.secondaryText
+                        }
                     }
                     Column {                     // name + host, exactly small-gap right of the dot
                         anchors.left: dot.right; anchors.leftMargin: Theme.spacing.small
@@ -361,11 +380,23 @@ Item {
         // ── Player bar (#9: breathing-yellow Caching… countdown → orange Playing) ──
         Rectangle {
             id: playerBar
-            Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium
+            Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium; clip: true
             visible: root.nowPlaying.length > 0
             readonly property bool caching: root.playPhase === "caching"
             color: root.bgSecondary; border.width: 1
             border.color: playerBar.caching ? root.cachingYellow : root.accent
+
+            // #19: caching progress fill — transparent yellow, grows left→right as the cache countdown completes
+            Rectangle {
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                visible: playerBar.caching
+                width: playerBar.caching
+                       ? parent.width * Math.max(0, Math.min(1, (root.listenBuffer - root.cacheLeft) / Math.max(1, root.listenBuffer)))
+                       : 0
+                color: Qt.rgba(root.cachingYellow.r, root.cachingYellow.g, root.cachingYellow.b, 0.18)
+                Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.Linear } }
+            }
+
             RowLayout {
                 anchors { fill: parent; leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium
                           topMargin: Theme.spacing.small; bottomMargin: Theme.spacing.small }
@@ -388,9 +419,10 @@ Item {
                     font.pixelSize: Theme.typography.primaryText; Layout.fillWidth: true
                     elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
                 }
-                LogosButton {
-                    text: "Stop"
-                    implicitWidth: 72; implicitHeight: 28
+                LogosButton {   // #19: perfect-round stop icon
+                    text: "■"
+                    implicitWidth: 30; implicitHeight: 30
+                    radius: 15      // width/2 → perfect circle
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: root.stopPlay()
                 }
