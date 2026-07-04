@@ -129,3 +129,24 @@ method replies — it rides delivery's **event push** (`.on("messageReceived"/"c
 (`experimental/lidl_gen_client.cpp:~236`) to run `invokeRemoteMethodAsync` under a nested `QEventLoop`
 so `modules().dep.method()` stays synchronous *and* pumps the loop → reply delivered → returns. That
 fixes it for every universal consumer of any Qt/legacy dep, not just the receiver.
+
+## Node 7 — Builder patch: sync wrapper → nested QEventLoop (fork logos-cpp-sdk) — insufficient
+- **Fork:** `/extra/tmp/logos-cpp-sdk-fork` (from `logos-co/logos-cpp-sdk` d12a7bb). Patched
+  `cpp-generator/experimental/lidl_gen_client.cpp` sync-method emission: run `invokeRemoteMethodAsync`
+  under a nested `QEventLoop` (v1), then + a `QTimer` timeout bail using `Timeout().ms` (=20000) so a
+  gated reply can't spin forever (v2). Built via `nix run . --override-input
+  logos-module-builder/logos-cpp-sdk path:/extra/tmp/logos-cpp-sdk-fork`.
+- **Override confirmed applied** (build log shows the fork path + generator rebuild); receiver plugin
+  compiled with the patched wrapper.
+- **Wall:** sync `createNode()` **still never returns** (>9 min, both v1 and v2). Decisive clue:
+  `/proc/<ui-host>/wchan = do_wait` — the thread is blocked **waiting on a child process**, NOT in a
+  QEventLoop or socket read. So the block is **inside the IPC consumer** (`invokeRemoteMethodAsync`
+  itself blocks before my nested loop ever runs), *deeper* than the generated wrapper.
+- **Insight:** the generator patch is the wrong layer. The sync deadlock isn't (only) the wrapper
+  choosing to block on the reply — the consumer's async path itself parks on a subprocess wait
+  (capability/token bootstrap?). Fixing it means the platform IPC consumer (`logos_api_client` /
+  ModuleProxy), not codegen. Per fork-tree methodology: attempt logged, NOT upstreamed (didn't work).
+
+## ✅ SHIPPED SOLUTION
+Receiver-side **fire-and-forget** (Node 6b, commit `ec0e850`) — proven end-to-end headless. That's the
+working universal migration. The builder patch is parked at Node 7's wall (platform-IPC-consumer issue).
