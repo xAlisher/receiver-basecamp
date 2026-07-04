@@ -22,6 +22,9 @@
 namespace {
 constexpr int    kTtlMs       = 45000;   // drop a station after 45s without a heartbeat (3 missed beats)
 constexpr int    kPruneMs     = 5000;
+constexpr int    kMaxPlayRetry = 2;      // auto-retries after ffplay self-exits before giving up (#12)
+constexpr qint64 kStablePlayMs = 45000;  // played this long before exiting ⇒ was healthy → reset retry budget
+constexpr int    kRetryBackoffMs = 1500; // brief backoff before a retry (let the reaped Tor's port free)
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -276,6 +279,7 @@ QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
         return QStringLiteral("unsafe_url");
     }
     m_playingUrl = streamUrl;
+    m_playAttempt = 0;   // fresh user-initiated play → reset the auto-retry budget (#12)
     setNowPlaying(stationName.isEmpty() ? streamUrl : stationName);
     const QString e = startFfplay();
     if (!e.isEmpty()) {
@@ -335,16 +339,50 @@ QString ReceiverUiBackend::startFfplay()
         killPlayer();
         return notFound ? QStringLiteral("ffplay/torsocks not found") : QStringLiteral("ffplay_failed");
     }
+    // A live radio stream never ends normally, so ffplay self-exiting means the stream dropped (cold HLS,
+    // onion rendezvous, tor). Watch for it → reap the listener Tor + retry (#12). killPlayer() disconnects
+    // this first, so an intentional stop/restart never triggers a retry.
+    m_playStartMs = QDateTime::currentMSecsSinceEpoch();
+    connect(m_player, &QProcess::finished, this, [this] {
+        retryOrStopPlayback(QDateTime::currentMSecsSinceEpoch() - m_playStartMs);
+    });
     return QString();
 }
 
 void ReceiverUiBackend::killPlayer()
 {
     if (!m_player) return;
+    disconnect(m_player, nullptr, this, nullptr);   // intentional kill — don't fire the retry handler (#12)
     m_player->terminate();
     if (!m_player->waitForFinished(2000)) m_player->kill();
     m_player->deleteLater();
     m_player = nullptr;
+}
+
+void ReceiverUiBackend::retryOrStopPlayback(qint64 ranMs)
+{
+    if (m_player) { m_player->deleteLater(); m_player = nullptr; }
+    if (m_playingUrl.isEmpty()) return;   // already stopped by the user
+
+    if (ranMs > kStablePlayMs) m_playAttempt = 0;   // was healthy for a while → fresh retry budget
+    if (m_playAttempt < kMaxPlayRetry) {
+        ++m_playAttempt;
+        // Reap the listener Tor: a stale one caches a failed onion descriptor lookup and keeps returning
+        // "no route", so a FRESH Tor (respawned by ensureTorListen on retry) is the actual fix (#12).
+        if (isOnionUrl(m_playingUrl)) killTorListen();
+        diag(QStringLiteral("player exited after %1ms — reap Tor + retry %2/%3").arg(ranMs).arg(m_playAttempt).arg(kMaxPlayRetry));
+        log(QStringLiteral("stream dropped — retrying (%1/%2)").arg(m_playAttempt).arg(kMaxPlayRetry));
+        QTimer::singleShot(kRetryBackoffMs, this, [this] {
+            if (m_playingUrl.isEmpty()) return;   // user stopped during the backoff
+            const QString e = startFfplay();
+            if (!e.isEmpty()) { m_playingUrl.clear(); setNowPlaying(QString()); log("retry failed: " + e); }
+        });
+        return;
+    }
+    diag(QStringLiteral("player exited after %1ms — giving up after %2 retries").arg(ranMs).arg(kMaxPlayRetry));
+    m_playingUrl.clear();
+    setNowPlaying(QString());
+    log(QStringLiteral("playback stopped — stream unavailable after %1 retries").arg(kMaxPlayRetry));
 }
 
 QString ReceiverUiBackend::ensureTorListen()
