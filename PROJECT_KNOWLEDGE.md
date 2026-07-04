@@ -104,6 +104,24 @@ specific. Full skill: `basecamp-skills/delivery-getclient-hang-295`. (Exact line
 - `delivery_module` pinned to **main** in `flake.nix` (the zerokit/RLN nix build fix, delivery #49,
   unblocks the v0.1.2 `zerokit-2.0.2` crates.io-403 that forced an earlier v0.1.1 pin).
 
+## Universal API migration (#20) — WORKS via fire-and-forget async (branch `feat/universal-api-migration`)
+
+The legacy `getClient`/`invokeRemoteMethod` shape above still ships on `main`. The universal port
+(`interface:universal`, `receiver_ui_backend.*` deriving `ReceiverUiSimpleSource, LogosUiPluginContext`,
+`modules().delivery_module.*` + `.on(...)`) is **proven end-to-end** (headless AND real Basecamp v0.2.0:
+discovery + pill + `.onion` audio) — **no upstream/builder/cpp-sdk fix needed**.
+
+- **The trap:** a **synchronous** `modules().delivery_module.createNode()` **deadlocks** — it blocks the
+  single-threaded ui-host loop, and delivery's reply is delivered *through* that loop → never returns.
+  Compiles clean, hangs at runtime. Diagnosed via `/proc/<ui-host>/wchan = do_wait` (block is in the IPC
+  consumer's subprocess wait, *deeper than codegen* — a generator QEventLoop patch was proven insufficient,
+  fork-tree Node 7).
+- **The fix (in our module):** fire-and-forget `createNodeAsync` → `QTimer 3s` → `startAsync` +
+  `subscribeAsync` + wire events. Don't chain on the reply callback (createNode's reply is gated behind
+  `start()` → circular). State/data ride the event PUSH (`.on("connectionStateChanged"/"messageReceived")`).
+  Skill: `basecamp-skills/universal-modules-sync-call-deadlocks-ui-host`. Full log: `docs/universal-migration-fork-tree.md`.
+- **Before merge:** reconcile the design-system QML/version onto the branch; the backend path is done.
+
 ## Two Main.qml — which one ships (READ before editing the view)
 
 This repo carries **two** views for two architectures. Editing the wrong one = zero visible effect.
@@ -139,6 +157,17 @@ Branch keeps both in sync (develop on relay → port to DIRECT). Skill:
 (`SocksPort`, bootstraps to 100%), then `torsocks ffplay` with `-cookies "cookieCheck=1; path=/"`
 (MediaMTX Secure-cookie) + `-infbuf -live_start_index -<buffer>` jitter buffer. Binaries via
 `resolveBin` (env → PATH); tor/ffmpeg installed per-OS (option 1; #114 blocks bundling in the lgx).
+
+**"Caching finished but no sound" is almost never the receiver — it's the `.onion` transport.** The
+caching countdown is a UI timer only; it flips to "Playing" before audio actually arrives. Diagnose
+top-down (playbook: memory `onion-playback-no-sound-playbook`, issue #12): (1) **broadcaster onion
+descriptor** — radio host `torhost-*/hs.log` shows `can't upload its current descriptor` = onion is
+DARK, no client can find it → `No route to host`; restart the radio station to republish (`status 200`).
+(2) **MediaMTX HLS cold** — on-demand without `hlsAlwaysRemux`; a plain `curl index.m3u8` is empty even
+when healthy — test with `ffprobe` (`aac 48000 2ch`), keep a warm reader. (3) **receiver's listener Tor
+cached the failure** — after the onion returns it keeps failing; `pkill -f receiver_ui/torlisten` → next
+tap spawns a clean Tor. Receiver-side fix owed (#12): reap+respawn the listener Tor on failure; reconsider
+ffplay `-live_start_index -42`/`-autoexit` (gives up on a cold/short playlist).
 
 ## Reserved isolated environment (DO NOT touch from other work)
 
