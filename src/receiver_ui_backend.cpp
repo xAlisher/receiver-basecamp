@@ -84,14 +84,20 @@ ReceiverUiBackend::~ReceiverUiBackend()
 
 void ReceiverUiBackend::onContextReady()
 {
-    // modules() is now live (framework wired the typed deps). Subscribe to delivery events FIRST so no
-    // announce/state is missed, then kick discovery. Universal path — no getClient/requestObject/token
-    // dance; the connectionStateChanged hang (295) is gone on v0.2 (issue #20).
+    // modules() is now live. Defer discovery ~2.5s (delivery_module just finished init). Do NOT subscribe
+    // to events yet — event subscription must happen AFTER the blocking createNode() returns, else the
+    // connectionStateChanged that delivery emits DURING createNode reenters this single ui-host thread
+    // while it's blocked on createNode's reply → deadlock (sync-ipc-reentrancy). See wireDeliveryEvents().
     diag(QStringLiteral("onContextReady: modules() wired"));
+    QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire deferred startDiscovery")); startDiscovery(); });
+}
 
+void ReceiverUiBackend::wireDeliveryEvents()
+{
+    if (m_eventsWired) return;
+    m_eventsWired = true;
     // messageReceived → announce ingest. connectionStateChanged → the status pill (d[0] =
-    // "Connected"|"PartiallyConnected"|"Disconnected"). Same generic bus the legacy onEvent used,
-    // now via the typed modules().delivery_module.on(eventName, cb) wrapper (proven by delivery-demo).
+    // "Connected"|"PartiallyConnected"|"Disconnected"). Typed modules().delivery_module.on(name, cb).
     modules().delivery_module.on("messageReceived", [this](const QVariantList& d) {
         diag(QStringLiteral("on messageReceived: d.size=%1").arg(d.size()));
         for (const QVariant& v : d) ingestAnnounce(v);
@@ -102,8 +108,7 @@ void ReceiverUiBackend::onContextReady()
             diag(QStringLiteral("on connectionStateChanged -> %1").arg(d[0].toString()));
         }
     });
-
-    startDiscovery();
+    diag(QStringLiteral("wireDeliveryEvents: subscribed (post-createNode)"));
 }
 
 QString ReceiverUiBackend::startDiscovery()
@@ -137,9 +142,10 @@ QString ReceiverUiBackend::startDiscovery()
         // ships a newer delivery). Do NOT bail on the result — that's what left the UI stuck on
         // "initializing" while the node had in fact started.
         diag(QStringLiteral("startDiscovery: createNode"));
-        modules().delivery_module.createNode(cfgJson);
-        modules().delivery_module.start();
-        diag(QStringLiteral("startDiscovery: createNode+start invoked"));
+        const LogosResult cr = modules().delivery_module.createNode(cfgJson);
+        const LogosResult sr = modules().delivery_module.start();
+        diag(QStringLiteral("createNode ok=%1 err=[%2] · start ok=%3 err=[%4]")
+                 .arg(cr.success).arg(cr.getError()).arg(sr.success).arg(sr.getError()));
 
         setNodeReady(true);
         log(QStringLiteral("delivery node up (logos.dev, %1 entry nodes)").arg(entry.size()));
@@ -150,6 +156,10 @@ QString ReceiverUiBackend::startDiscovery()
     if (connectionStatus() == QLatin1String("initializing"))
         setConnectionStatus(QStringLiteral("connecting"));   // unstick the status until peers arrive
     log("discovering on " + directoryTopic());
+
+    // NOW that all blocking createNode/start/subscribe calls have returned, it's safe to subscribe to
+    // delivery events without deadlocking the ui-host thread (#20 sync-ipc-reentrancy).
+    wireDeliveryEvents();
     return QString();
 }
 

@@ -45,6 +45,7 @@ private:
         qint64  lastSeenMs = 0;
     };
 
+    void wireDeliveryEvents();                       // subscribe to delivery events AFTER createNode (reentrancy)
     void ingestAnnounce(const QVariant& payload);   // robust base64/utf8 decode → JSON → registry
     void pruneStations();                            // drop stations past the TTL
     void publishStations();                          // rebuild stationsJson PROP from m_stations
@@ -60,7 +61,7 @@ private:
     void    killTorListen();
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
 
-    bool            m_discoveryStarted = false;
+    bool            m_eventsWired = false;
     QTimer*         m_pruneTimer = nullptr;
 
     QProcess*     m_player    = nullptr;
