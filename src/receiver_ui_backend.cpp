@@ -137,28 +137,37 @@ QString ReceiverUiBackend::startDiscovery()
         };
         const QString cfgJson = QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
 
-        // Best-effort: the calls take effect server-side even when the cross-version LogosResult
-        // marshals back as success=false (receiver is built against delivery v0.1.1; the platform
-        // ships a newer delivery). Do NOT bail on the result — that's what left the UI stuck on
-        // "initializing" while the node had in fact started.
-        diag(QStringLiteral("startDiscovery: createNode"));
-        const LogosResult cr = modules().delivery_module.createNode(cfgJson);
-        const LogosResult sr = modules().delivery_module.start();
-        diag(QStringLiteral("createNode ok=%1 err=[%2] · start ok=%3 err=[%4]")
-                 .arg(cr.success).arg(cr.getError()).arg(sr.success).arg(sr.getError()));
-
+        // #20 FIX — FIRE-AND-FORGET async. Headless findings:
+        //  - SYNC createNode() deadlocks: blocks the single ui-host thread; delivery's reply needs that
+        //    (now-blocked) event loop → never returns.
+        //  - ASYNC createNodeAsync's *reply callback* also doesn't get delivered here — BUT the async
+        //    *send* IS processed server-side (delivery logs "context created successfully").
+        // So don't rely on the reply/callback at all: fire createNode, then fire start after a short
+        // delay (so the context exists — the reply that would sequence them isn't coming), then subscribe.
+        // The node comes up from the sends; discovery rides delivery's event-PUSH (.on) path.
+        diag(QStringLiteral("startDiscovery: createNodeAsync (fire-and-forget — sync deadlocks + async reply undelivered, #20)"));
+        modules().delivery_module.createNodeAsync(cfgJson,
+            [this](LogosResult r){ diag(QStringLiteral("createNodeAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
         setNodeReady(true);
-        log(QStringLiteral("delivery node up (logos.dev, %1 entry nodes)").arg(entry.size()));
+        const int entryCount = entry.size();
+        QTimer::singleShot(3000, this, [this, entryCount]{
+            diag(QStringLiteral("fire startAsync + subscribe (context should exist by now)"));
+            modules().delivery_module.startAsync(
+                [this](LogosResult r){ diag(QStringLiteral("startAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
+            log(QStringLiteral("delivery node up (logos.dev, %1 entry nodes, async fire-and-forget)").arg(entryCount));
+            subscribeTopic(directoryTopic());
+            setDiscovering(true);
+            if (connectionStatus() == QLatin1String("initializing"))
+                setConnectionStatus(QStringLiteral("connecting"));
+            log("discovering on " + directoryTopic());
+            wireDeliveryEvents();
+        });
+        return QString();   // node bring-up continues on the timer above
     }
 
-    subscribeTopic(directoryTopic());     // best-effort
+    // Already node-ready (re-entry, e.g. QML re-calls startDiscovery): just (re)subscribe + wire.
+    subscribeTopic(directoryTopic());
     setDiscovering(true);
-    if (connectionStatus() == QLatin1String("initializing"))
-        setConnectionStatus(QStringLiteral("connecting"));   // unstick the status until peers arrive
-    log("discovering on " + directoryTopic());
-
-    // NOW that all blocking createNode/start/subscribe calls have returned, it's safe to subscribe to
-    // delivery events without deadlocking the ui-host thread (#20 sync-ipc-reentrancy).
     wireDeliveryEvents();
     return QString();
 }
@@ -167,7 +176,7 @@ QString ReceiverUiBackend::stopDiscovery()
 {
     if (!isContextReady()) return QStringLiteral("context_not_ready");
     for (const QString& t : m_subscribed)
-        modules().delivery_module.unsubscribe(t);
+        modules().delivery_module.unsubscribeAsync(t, [](LogosResult){}, Timeout());  // async — sync would deadlock (#20)
     m_subscribed.clear();
     setDiscovering(false);
     log("discovery stopped");
@@ -187,7 +196,8 @@ bool ReceiverUiBackend::subscribeTopic(const QString& topic)
 {
     if (!isContextReady()) return false;
     if (m_subscribed.contains(topic)) return true;
-    modules().delivery_module.subscribe(topic);
+    // async — sync subscribe() would deadlock the ui-host event loop like createNode (#20)
+    modules().delivery_module.subscribeAsync(topic, [](LogosResult){}, Timeout());
     m_subscribed.insert(topic);
     return true;
 }
