@@ -6,32 +6,20 @@
 #include <QHash>
 #include <QSet>
 #include <QDateTime>
-#include "receiver_ui_interface.h"
-#include "LogosViewPluginBase.h"
-#include "rep_receiver_ui_source.h"
+#include "rep_receiver_ui_source.h"      // ReceiverUiSimpleSource (repc from src/receiver_ui.rep)
+#include "logos_ui_plugin_context.h"     // LogosUiPluginContext: modules() + onContextReady()
 
-class LogosAPI;
-class LogosAPIClient;
-class LogosObject;
 class QTimer;
 class QProcess;
 
-class ReceiverUiPlugin : public ReceiverUiSimpleSource,
-                         public ReceiverUiInterface,
-                         public ReceiverUiViewPluginBase
+// Universal ui_qml backend (#20) — bridges QML (logos.module("receiver_ui")) to the delivery_module
+// via modules().delivery_module.*, replacing the legacy LogosAPI/getClient/requestObject/onEvent path.
+class ReceiverUiBackend : public ReceiverUiSimpleSource,
+                          public LogosUiPluginContext
 {
-    Q_OBJECT
-    Q_PLUGIN_METADATA(IID ReceiverUiInterface_iid FILE "metadata.json")
-    Q_INTERFACES(ReceiverUiInterface)
-
 public:
-    explicit ReceiverUiPlugin(QObject* parent = nullptr);
-    ~ReceiverUiPlugin() override;
-
-    QString name()    const override { return "receiver_ui"; }
-    QString version() const override { return "0.1.0"; }
-
-    Q_INVOKABLE void initLogos(LogosAPI* api);
+    explicit ReceiverUiBackend(QObject* parent = nullptr);
+    ~ReceiverUiBackend() override;
 
     // .rep SLOTs (all return "" on success, else an error string)
     QString startDiscovery() override;
@@ -43,8 +31,9 @@ public:
     QString setCacheHidden(bool on) override;
     QString clearCache() override;
 
-signals:
-    void eventResponse(const QString& eventName, const QVariantList& args);
+protected:
+    // Fires once modules() is wired — subscribe to delivery events + kick discovery (was initLogos).
+    void onContextReady() override;
 
 private:
     struct Station {
@@ -56,7 +45,7 @@ private:
         qint64  lastSeenMs = 0;
     };
 
-    void wireEvents();
+    void wireDeliveryEvents();                       // subscribe to delivery events AFTER createNode (reentrancy)
     void ingestAnnounce(const QVariant& payload);   // robust base64/utf8 decode → JSON → registry
     void pruneStations();                            // drop stations past the TTL
     void publishStations();                          // rebuild stationsJson PROP from m_stations
@@ -72,9 +61,6 @@ private:
     void    killTorListen();
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
 
-    LogosAPI*       m_logosAPI = nullptr;
-    LogosAPIClient* m_delivery = nullptr;   // ONLY the delivery client (not all-module LogosModules, which hangs)
-    LogosObject*    m_deliveryObj = nullptr;
     bool            m_eventsWired = false;
     QTimer*         m_pruneTimer = nullptr;
 
