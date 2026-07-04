@@ -1,8 +1,6 @@
-#include "receiver_ui_plugin.h"
-#include "logos_api.h"
-#include "logos_sdk.h"
+#include "receiver_ui_backend.h"
+#include "logos_sdk.h"        // generated: modules().delivery_module (Qt-typed) — #20 universal
 #include "logos_types.h"
-#include "token_manager.h"   // stash↔storage workaround: pre-seed the capability token (see initLogos)
 
 #include <QDebug>
 #include <QDir>
@@ -64,91 +62,53 @@ QProcessEnvironment cleanSpawnEnv() {
 }
 }
 
-ReceiverUiPlugin::ReceiverUiPlugin(QObject* parent)
+ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
     : ReceiverUiSimpleSource(parent)
 {
-}
-
-ReceiverUiPlugin::~ReceiverUiPlugin()
-{
-    stopPlayback();
-    // m_delivery is owned by LogosAPI — do not delete.
-}
-
-void ReceiverUiPlugin::initLogos(LogosAPI* api)
-{
-    if (m_logosAPI) return;
-    diag(QStringLiteral("initLogos ENTER"));
-    m_logosAPI = api;
-
-    // setBackend FIRST → the view↔backend handshake completes immediately (no spinner). Constructing
-    // LogosModules synchronously here blocks that handshake in this busy profile → spinner. So defer it.
-    setBackend(this);
-    diag(QStringLiteral("initLogos setBackend done"));
-
-    // cheap, no IPC — restore persisted settings (generated READONLY-PROP source-side setters)
+    // cheap, no IPC — restore persisted settings + start the station-TTL prune loop. Delivery wiring
+    // waits for modules() (onContextReady).
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
-    setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s, ~20s default
+    setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
 
     m_pruneTimer = new QTimer(this);
     m_pruneTimer->setInterval(kPruneMs);
-    QObject::connect(m_pruneTimer, &QTimer::timeout, this, &ReceiverUiPlugin::pruneStations);
+    QObject::connect(m_pruneTimer, &QTimer::timeout, this, &ReceiverUiBackend::pruneStations);
     m_pruneTimer->start();
-
-    // Deferred getClient: do NOT getClient synchronously here. Returning from initLogos fast lets the
-    // view↔backend handshake complete, so the ui-host stays ALIVE even though getClient (in
-    // startDiscovery, below) then hangs on 295 — giving a STABLE hung process (no 2s handshake SIGKILL)
-    // whose blocking thread is observable (wchan/stack). startDiscovery seeds the token + getClient +
-    // wireEvents. (On 268 getClient returns instantly, so this also discovers + plays.)
-    QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire startDiscovery (deferred getClient)")); startDiscovery(); });
-    diag(QStringLiteral("initLogos EXIT (getClient deferred)"));
 }
 
-void ReceiverUiPlugin::wireEvents()
+ReceiverUiBackend::~ReceiverUiBackend()
 {
-    if (!m_delivery || m_eventsWired) return;
-    m_deliveryObj = m_delivery->requestObject("delivery_module");
-    if (!m_deliveryObj) { diag(QStringLiteral("wireEvents: requestObject NULL")); return; }
-    m_eventsWired = true;
-    // Defer onEvent by one event-loop iteration so the dynamic replica finishes initializing — its
-    // eventResponse signal doesn't exist until then, so a synchronous connect silently no-ops (this is
-    // the ONLY difference vs logos-chat-ui ChatBackend, the one ui-host that provably receives events;
-    // see research issue #4). Also try every arg (ingestAnnounce no-ops on non-announce args) + diag d.size.
-    QTimer::singleShot(0, this, [this]{
-        if (!m_deliveryObj) return;
-        m_delivery->onEvent(m_deliveryObj, "messageReceived", [this](const QString&, const QVariantList& d) {
-            diag(QStringLiteral("onEvent messageReceived: d.size=%1").arg(d.size()));
-            for (const QVariant& v : d) ingestAnnounce(v);
-        });
-        // Live relay-connectivity for the status pill. delivery_module maps its raw connection_status_change
-        // → the "connectionStateChanged" event with d[0] = "Connected"|"PartiallyConnected"|"Disconnected"
-        // (delivery_module_plugin.cpp). Drive connectionStatus off it so the pill is truthful and can fall
-        // back down — the old code only ever set "initializing"→"connecting" and never saw the real state.
-        m_delivery->onEvent(m_deliveryObj, "connectionStateChanged", [this](const QString&, const QVariantList& d) {
-            if (!d.isEmpty()) {
-                setConnectionStatus(d[0].toString());
-                diag(QStringLiteral("onEvent connectionStateChanged -> %1").arg(d[0].toString()));
-            }
-        });
-        diag(QStringLiteral("wireEvents: onEvent subscribed (deferred singleShot 0)"));
+    stopPlayback();
+}
+
+void ReceiverUiBackend::onContextReady()
+{
+    // modules() is now live (framework wired the typed deps). Subscribe to delivery events FIRST so no
+    // announce/state is missed, then kick discovery. Universal path — no getClient/requestObject/token
+    // dance; the connectionStateChanged hang (295) is gone on v0.2 (issue #20).
+    diag(QStringLiteral("onContextReady: modules() wired"));
+
+    // messageReceived → announce ingest. connectionStateChanged → the status pill (d[0] =
+    // "Connected"|"PartiallyConnected"|"Disconnected"). Same generic bus the legacy onEvent used,
+    // now via the typed modules().delivery_module.on(eventName, cb) wrapper (proven by delivery-demo).
+    modules().delivery_module.on("messageReceived", [this](const QVariantList& d) {
+        diag(QStringLiteral("on messageReceived: d.size=%1").arg(d.size()));
+        for (const QVariant& v : d) ingestAnnounce(v);
     });
-    diag(QStringLiteral("wireEvents: requestObject ok, onEvent deferred to next tick"));
+    modules().delivery_module.on("connectionStateChanged", [this](const QVariantList& d) {
+        if (!d.isEmpty()) {
+            setConnectionStatus(d[0].toString());
+            diag(QStringLiteral("on connectionStateChanged -> %1").arg(d[0].toString()));
+        }
+    });
+
+    startDiscovery();
 }
 
-QString ReceiverUiPlugin::startDiscovery()
+QString ReceiverUiBackend::startDiscovery()
 {
-    if (!m_delivery) {
-        if (!m_logosAPI) return QStringLiteral("no_api");
-        { TokenManager& tm = TokenManager::instance();   // stash↔storage token-seed before getClient
-          if (tm.getToken(QStringLiteral("delivery_module")).isEmpty())
-              tm.saveToken(QStringLiteral("delivery_module"), QStringLiteral("receiver_bootstrap_v1")); }
-        diag(QStringLiteral("startDiscovery: getClient(delivery_module)"));
-        m_delivery = m_logosAPI->getClient("delivery_module");
-        diag(QStringLiteral("startDiscovery: getClient -> %1").arg(m_delivery ? QStringLiteral("ok") : QStringLiteral("NULL")));
-        if (!m_delivery) { log(QStringLiteral("no delivery client")); return QStringLiteral("no_delivery_client"); }
-    }
-    wireEvents();
+    if (!isContextReady()) return QStringLiteral("context_not_ready");
 
     if (!nodeReady()) {
         // preset logos.dev + relay:true to interop with live radio-basecamp hosts (e.g. Sneg's
@@ -176,12 +136,9 @@ QString ReceiverUiPlugin::startDiscovery()
         // marshals back as success=false (receiver is built against delivery v0.1.1; the platform
         // ships a newer delivery). Do NOT bail on the result — that's what left the UI stuck on
         // "initializing" while the node had in fact started.
-        { TokenManager& tm = TokenManager::instance();   // re-seed (stash re-injects before each use)
-          if (tm.getToken(QStringLiteral("delivery_module")).isEmpty())
-              tm.saveToken(QStringLiteral("delivery_module"), QStringLiteral("receiver_bootstrap_v1")); }
-        diag(QStringLiteral("startDiscovery: invoke createNode"));
-        m_delivery->invokeRemoteMethod("delivery_module", "createNode", cfgJson);
-        m_delivery->invokeRemoteMethod("delivery_module", "start");
+        diag(QStringLiteral("startDiscovery: createNode"));
+        modules().delivery_module.createNode(cfgJson);
+        modules().delivery_module.start();
         diag(QStringLiteral("startDiscovery: createNode+start invoked"));
 
         setNodeReady(true);
@@ -196,18 +153,18 @@ QString ReceiverUiPlugin::startDiscovery()
     return QString();
 }
 
-QString ReceiverUiPlugin::stopDiscovery()
+QString ReceiverUiBackend::stopDiscovery()
 {
-    if (!m_delivery) return QStringLiteral("backend not initialised");
+    if (!isContextReady()) return QStringLiteral("context_not_ready");
     for (const QString& t : m_subscribed)
-        m_delivery->invokeRemoteMethod("delivery_module", "unsubscribe", t);
+        modules().delivery_module.unsubscribe(t);
     m_subscribed.clear();
     setDiscovering(false);
     log("discovery stopped");
     return QString();
 }
 
-QString ReceiverUiPlugin::addTopic(QString topic)
+QString ReceiverUiBackend::addTopic(QString topic)
 {
     topic = topic.trimmed();
     if (topic.isEmpty()) return QStringLiteral("empty topic");
@@ -216,16 +173,16 @@ QString ReceiverUiPlugin::addTopic(QString topic)
     return QString();
 }
 
-bool ReceiverUiPlugin::subscribeTopic(const QString& topic)
+bool ReceiverUiBackend::subscribeTopic(const QString& topic)
 {
-    if (!m_delivery) return false;
+    if (!isContextReady()) return false;
     if (m_subscribed.contains(topic)) return true;
-    m_delivery->invokeRemoteMethod("delivery_module", "subscribe", topic);
+    modules().delivery_module.subscribe(topic);
     m_subscribed.insert(topic);
     return true;
 }
 
-void ReceiverUiPlugin::ingestAnnounce(const QVariant& payload)
+void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
 {
     // Robust decode: radio hosts send the announce JSON; on receipt the payload is a base64 string
     // (radio's proven single decode). Fall back to raw UTF-8 / raw bytes so we parse regardless.
@@ -261,7 +218,7 @@ void ReceiverUiPlugin::ingestAnnounce(const QVariant& payload)
     publishStations();
 }
 
-void ReceiverUiPlugin::pruneStations()
+void ReceiverUiBackend::pruneStations()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     bool changed = false;
@@ -272,7 +229,7 @@ void ReceiverUiPlugin::pruneStations()
     if (changed) publishStations();
 }
 
-void ReceiverUiPlugin::publishStations()
+void ReceiverUiBackend::publishStations()
 {
     QJsonArray arr;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -289,7 +246,7 @@ void ReceiverUiPlugin::publishStations()
     setStationsJson(QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
 }
 
-QString ReceiverUiPlugin::play(QString streamUrl, QString stationName)
+QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
 {
     // Security seam (radio #18): a station's streamUrl is attacker-controlled (anyone can announce).
     // Only let ffplay open http/https — never file:/pipe:/concat:/device/other ffmpeg protocols.
@@ -311,7 +268,7 @@ QString ReceiverUiPlugin::play(QString streamUrl, QString stationName)
     return QString();
 }
 
-QString ReceiverUiPlugin::startFfplay()
+QString ReceiverUiBackend::startFfplay()
 {
     killPlayer();
     const bool onion = isOnionUrl(m_playingUrl);
@@ -361,7 +318,7 @@ QString ReceiverUiPlugin::startFfplay()
     return QString();
 }
 
-void ReceiverUiPlugin::killPlayer()
+void ReceiverUiBackend::killPlayer()
 {
     if (!m_player) return;
     m_player->terminate();
@@ -370,7 +327,7 @@ void ReceiverUiPlugin::killPlayer()
     m_player = nullptr;
 }
 
-QString ReceiverUiPlugin::ensureTorListen()
+QString ReceiverUiBackend::ensureTorListen()
 {
     if (m_torListen && m_torListen->state() == QProcess::Running) return QString();
     const int base = 9250;   // dedicated listener SOCKS range (avoid system tor's 9050)
@@ -389,7 +346,7 @@ QString ReceiverUiPlugin::ensureTorListen()
     return err.isEmpty() ? QStringLiteral("tor_listen_failed") : err;
 }
 
-void ReceiverUiPlugin::killTorListen()
+void ReceiverUiBackend::killTorListen()
 {
     if (!m_torListen) return;
     m_torListen->terminate();
@@ -400,7 +357,7 @@ void ReceiverUiPlugin::killTorListen()
     m_listenSocksPort = 0;
 }
 
-bool ReceiverUiPlugin::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
+bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
 {
     const QString bin = resolveBin(QStringLiteral("tor"), "RECEIVER_TOR_BIN");
     const QString dataDir = dir + "/data", torrc = dir + "/torrc";
@@ -433,7 +390,7 @@ bool ReceiverUiPlugin::startTorProc(QString& dir, const QString& cfg, int socksP
     return true;
 }
 
-QString ReceiverUiPlugin::stopPlayback()
+QString ReceiverUiBackend::stopPlayback()
 {
     killPlayer();
     killTorListen();
@@ -442,7 +399,7 @@ QString ReceiverUiPlugin::stopPlayback()
     return QString();
 }
 
-QString ReceiverUiPlugin::setBuffer(int sec)
+QString ReceiverUiBackend::setBuffer(int sec)
 {
     sec = qBound(2, sec, 60);   // #11 ceiling 60s
     setListenBuffer(sec);   // generated PROP setter → auto-syncs to QML
@@ -451,7 +408,7 @@ QString ReceiverUiPlugin::setBuffer(int sec)
     return QString();
 }
 
-QString ReceiverUiPlugin::setCacheHidden(bool on)
+QString ReceiverUiBackend::setCacheHidden(bool on)
 {
     setHideCache(on);       // generated PROP setter → auto-syncs to QML
     QSettings{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)}
@@ -461,7 +418,7 @@ QString ReceiverUiPlugin::setCacheHidden(bool on)
     return QString();
 }
 
-QString ReceiverUiPlugin::clearCache()
+QString ReceiverUiBackend::clearCache()
 {
     const QString dir = cacheDir();
     if (dir.isEmpty()) return QString();
@@ -471,19 +428,19 @@ QString ReceiverUiPlugin::clearCache()
     return QString();
 }
 
-QString ReceiverUiPlugin::cacheDir() const
+QString ReceiverUiBackend::cacheDir() const
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (base.isEmpty()) return QString();
     return base + QStringLiteral("/receiver_ui");
 }
 
-QString ReceiverUiPlugin::directoryTopic() const
+QString ReceiverUiBackend::directoryTopic() const
 {
     return QString::fromLatin1(kDirTopic);
 }
 
-void ReceiverUiPlugin::log(const QString& line)
+void ReceiverUiBackend::log(const QString& line)
 {
     qInfo() << "receiver_ui:" << line;
     emit activity(line);

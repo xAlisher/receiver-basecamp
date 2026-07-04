@@ -11,7 +11,8 @@ logos_module(
     NAME receiver_ui
     REP_FILE src/receiver_ui.rep
     SOURCES
-        src/receiver_ui_interface.h
-        src/receiver_ui_plugin.h
-        src/receiver_ui_plugin.cpp
+        src/receiver_ui_backend.h
+        src/receiver_ui_backend.cpp
+    INCLUDE_DIRS
+        src
 )
