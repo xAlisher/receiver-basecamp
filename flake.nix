@@ -2,7 +2,7 @@
   description = "Receiver — discover & listen to decentralized Logos radio broadcasts (listen-only, cross-platform)";
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.0";  # universal codegen (#20)
+    logos-module-builder.url = "github:logos-co/logos-module-builder";  # #20: newest master (compiles; createNode still hangs — see issue). thread-safe-ipc/module-context branches need the impl_header rewrite.
     # delivery_module is auto-resolved from metadata.json `dependencies` via this input.
     # Pin to MAIN (not a tag): main carries the zerokit/RLN nix build fix (#49, 2026-06-09) that fixes
     # the crates.io-403 which had forced us to v0.1.1 — AND main's version (1.0.0) MATCHES the delivery
