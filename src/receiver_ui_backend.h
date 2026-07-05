@@ -75,6 +75,7 @@ private:
     int           m_playAttempt = 0;    // consecutive auto-retries for the current station (#12)
     QTimer*       m_watchdog    = nullptr;  // #23 no-audio watchdog (single-shot per play attempt)
     bool          m_audioFlowing = false;   // #23 ffplay emitted decode stats → real audio is flowing
+    bool          m_reapedOnce  = false;    // #23 reaped a (stale) listener Tor once this play → now patient
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;

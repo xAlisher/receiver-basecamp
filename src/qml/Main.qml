@@ -91,6 +91,10 @@ Item {
 
     Rectangle { anchors.fill: parent; color: root.bgPrimary }
 
+    // clipboard helper — the sandbox has no Clipboard API; TextEdit.copy() is the proven path (radio_ui #12)
+    function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy(); clipHelper.text = "" }
+    TextEdit { id: clipHelper; visible: false }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Theme.spacing.medium
@@ -371,7 +375,26 @@ Item {
             color: root.bgSecondary; border.color: root.borderColor; border.width: 1
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: Theme.spacing.small; spacing: Theme.spacing.tiny / 2
-                LogosText { text: "Activity"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosText { text: "Activity"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+                    Item { Layout.fillWidth: true }
+                    // copy-all icon — two overlapping rectangles (keycard ActivityLog style)
+                    Rectangle {
+                        id: copyBtn
+                        visible: root.events.length > 0
+                        implicitWidth: 20; implicitHeight: 20; color: "transparent"
+                        opacity: copyArea.containsMouse ? 0.9 : 0.5
+                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                        Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
+                        Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgSecondary; border.color: root.textMuted; border.width: 1; radius: 2 }
+                        Timer { id: copyFb; interval: 200; onTriggered: copyBtn.opacity = copyArea.containsMouse ? 0.9 : 0.5 }
+                        MouseArea {
+                            id: copyArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: { root.copyText(root.events.join("\n")); copyBtn.opacity = 0.25; copyFb.restart() }
+                        }
+                    }
+                }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                     model: root.events

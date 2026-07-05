@@ -26,9 +26,10 @@ constexpr int    kPruneMs     = 5000;
 constexpr int    kMaxPlayRetry = 2;      // auto-retries after ffplay self-exits before giving up (#12)
 constexpr qint64 kStablePlayMs = 45000;  // played this long before exiting ⇒ was healthy → reset retry budget
 constexpr int    kRetryBackoffMs = 1500; // brief backoff before a retry (let the reaped Tor's port free)
-constexpr int    kNoAudioMs      = 30000; // #23 no audio in this window ⇒ stuck (stale Tor) → reap+retry.
-                                          // Must exceed a FRESH tor's bootstrap+connect (~25s, measured) so
-                                          // the retry's own tor isn't reaped before it can land audio.
+constexpr int    kNoAudioMs      = 35000; // #23 first stall window — long enough that a fresh cold Tor
+                                          // (~25s bootstrap+connect, measured) isn't reaped before it lands.
+constexpr int    kPatientMs      = 55000; // #23 after ONE reap, wait patiently for the fresh Tor — reaping
+                                          // again just churns (kills each tor mid-bootstrap → never connects).
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -289,6 +290,7 @@ QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
     }
     m_playingUrl = streamUrl;
     m_playAttempt = 0;   // fresh user-initiated play → reset the auto-retry budget (#12)
+    m_reapedOnce = false;   // #23 fresh play → the one-reap allowance resets
     setNowPlaying(stationName.isEmpty() ? streamUrl : stationName);
     const QString e = startFfplay();
     if (!e.isEmpty()) {
@@ -384,18 +386,35 @@ QString ReceiverUiBackend::startFfplay()
         m_watchdog->setSingleShot(true);
         QObject::connect(m_watchdog, &QTimer::timeout, this, &ReceiverUiBackend::onNoAudioWatchdog);
     }
-    m_watchdog->start(kNoAudioMs);
+    m_watchdog->start(m_reapedOnce ? kPatientMs : kNoAudioMs);  // patient window after the one reap
     return QString();
 }
 
 void ReceiverUiBackend::onNoAudioWatchdog()
 {
     if (m_playingUrl.isEmpty() || m_audioFlowing) return;   // stopped, or audio came through
-    // ffplay is up but no decode stats after kNoAudioMs → stuck on a cold/failed Tor circuit.
-    diag(QStringLiteral("no-audio watchdog fired — ffplay silent, reap Tor + retry"));
+    if (m_reapedOnce) {
+        // Already reaped once and gave the FRESH Tor a full patient window — still silent. Reaping again
+        // just churns (each new Tor is killed mid-bootstrap and never connects). Stop and let the user retry.
+        diag(QStringLiteral("no-audio watchdog: fresh Tor still silent after patient window — giving up"));
+        killPlayer(); killTorListen();
+        m_playingUrl.clear(); setNowPlaying(QString());
+        log(QStringLiteral("no sound — station unreachable, try again"));
+        return;
+    }
+    // First stall: the listener Tor may be stale (cached a failed HS-descriptor lookup when the broadcaster
+    // was briefly dark) — measured: same ffplay is 9s on a fresh Tor vs >125s on the stale one. Reap it ONCE
+    // for a clean circuit, then wait patiently (kPatientMs) — do NOT churn.
+    m_reapedOnce = true;
+    diag(QStringLiteral("no-audio watchdog fired — reap stale Tor once, then patient retry"));
     log(QStringLiteral("no sound yet — reconnecting"));
-    killPlayer();               // kill the hung ffplay (disconnects the finished handler)
-    retryOrStopPlayback(0);     // reap the listener Tor + retry (fail-fast), or give up after kMaxPlayRetry
+    killPlayer();          // disconnects the finished handler so the reap doesn't also trip #21
+    killTorListen();       // drop the stale Tor → ensureTorListen() spawns a fresh one on the retry
+    QTimer::singleShot(kRetryBackoffMs, this, [this] {
+        if (m_playingUrl.isEmpty()) return;   // user stopped during the backoff
+        const QString e = startFfplay();
+        if (!e.isEmpty()) { m_playingUrl.clear(); setNowPlaying(QString()); }
+    });
 }
 
 void ReceiverUiBackend::killPlayer()
