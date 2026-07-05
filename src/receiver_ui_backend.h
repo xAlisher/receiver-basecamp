@@ -25,6 +25,8 @@ public:
     QString startDiscovery() override;
     QString stopDiscovery() override;
     QString addTopic(QString topic) override;
+    QString pinStation(QString pubkey) override;     // #14 pin/unpin a verified station by identity
+    QString unpinStation(QString pubkey) override;
     QString play(QString streamUrl, QString stationName) override;
     QString prewarm(QString streamUrl) override;   // #26/#30 spawn the listener Tor early on select/discovery
     QString stopPlayback() override;
@@ -54,6 +56,9 @@ private:
     void ingestAnnounce(const QVariant& payload);   // robust base64/utf8 decode → JSON → registry
     void pruneStations();                            // drop stations past the TTL
     void publishStations();                          // rebuild stationsJson PROP from m_stations
+    void publishPinned();                            // #14 rebuild pinnedJson (online = live station w/ same pubkey)
+    void loadPins();                                 // #14 restore pinned set from QSettings
+    void savePins();                                 // #14 persist pinned set to QSettings
     bool subscribeTopic(const QString& topic);
     QString directoryTopic() const;
     QString cacheDir() const;
@@ -86,6 +91,10 @@ private:
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;
+
+    // #14 pinned stations — keyed by station pubkey; meta = last-known {name,topic,streamUrl,privacy,fingerprint}
+    // so a pin survives reload + shows offline with its remembered name until the same pubkey reappears.
+    QHash<QString, QJsonObject> m_pinnedMeta;
 };
 
 #endif // RECEIVER_UI_PLUGIN_H

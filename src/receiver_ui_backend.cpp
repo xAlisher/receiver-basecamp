@@ -81,6 +81,7 @@ ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
     setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
+    loadPins();   // #14 restore pinned stations (persist across module reload)
 
     m_pruneTimer = new QTimer(this);
     m_pruneTimer->setInterval(kPruneMs);
@@ -267,6 +268,14 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         s.pubkey      = pubkey;
         s.fingerprint = StationIdentity::fingerprint(pubkey);
         s.verified    = true;
+        // #14 keep a pinned station's last-known name/topic fresh (so it shows the right name while offline).
+        if (m_pinnedMeta.contains(pubkey)) {
+            QJsonObject m = m_pinnedMeta.value(pubkey);
+            m["name"] = s.name; m["topic"] = s.topic; m["streamUrl"] = s.streamUrl;
+            m["privacy"] = s.privacy; m["fingerprint"] = s.fingerprint;
+            m_pinnedMeta.insert(pubkey, m);
+            savePins();
+        }
     }
 
     const QString key = s.topic + "|" + s.name;
@@ -309,6 +318,73 @@ void ReceiverUiBackend::publishStations()
         arr.append(o);
     }
     setStationsJson(QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+    publishPinned();
+}
+
+// #14 pin a verified station by its pubkey. Only verified (signed) stations have an identity to pin to.
+QString ReceiverUiBackend::pinStation(QString pubkey)
+{
+    pubkey = pubkey.trimmed();
+    if (pubkey.isEmpty()) return QStringLiteral("only verified stations can be pinned");
+    QJsonObject meta{{"pubkey", pubkey}, {"fingerprint", StationIdentity::fingerprint(pubkey)}};
+    for (const Station& s : m_stations)
+        if (s.pubkey == pubkey) {
+            meta["name"] = s.name; meta["topic"] = s.topic; meta["streamUrl"] = s.streamUrl; meta["privacy"] = s.privacy;
+            break;
+        }
+    m_pinnedMeta.insert(pubkey, meta);
+    savePins();
+    publishPinned();
+    log("pinned station");
+    return QString();
+}
+
+QString ReceiverUiBackend::unpinStation(QString pubkey)
+{
+    m_pinnedMeta.remove(pubkey.trimmed());
+    savePins();
+    publishPinned();
+    return QString();
+}
+
+// online = a live station currently carries this pubkey (m_stations is already TTL-pruned). Display fields
+// come from the live announce when online, else the last-known persisted meta (shows the remembered name).
+void ReceiverUiBackend::publishPinned()
+{
+    QJsonArray arr;
+    for (auto it = m_pinnedMeta.constBegin(); it != m_pinnedMeta.constEnd(); ++it) {
+        QJsonObject o = it.value();
+        const Station* live = nullptr;
+        for (const Station& s : m_stations)
+            if (s.pubkey == it.key()) { live = &s; break; }
+        o["online"] = (live != nullptr);
+        o["pinned"] = true;
+        if (live) {
+            o["name"] = live->name; o["streamUrl"] = live->streamUrl; o["privacy"] = live->privacy;
+            o["topic"] = live->topic; o["nowPlaying"] = live->nowPlaying; o["fingerprint"] = live->fingerprint;
+        }
+        arr.append(o);
+    }
+    setPinnedJson(QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+}
+
+void ReceiverUiBackend::loadPins()
+{
+    QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
+    const QJsonArray arr = QJsonDocument::fromJson(s.value(QStringLiteral("pinnedMeta")).toByteArray()).array();
+    for (const QJsonValue& v : arr) {
+        const QJsonObject o = v.toObject();
+        const QString pk = o.value(QStringLiteral("pubkey")).toString();
+        if (!pk.isEmpty()) m_pinnedMeta.insert(pk, o);
+    }
+}
+
+void ReceiverUiBackend::savePins()
+{
+    QJsonArray arr;
+    for (const QJsonObject& o : m_pinnedMeta) arr.append(o);
+    QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
+    s.setValue(QStringLiteral("pinnedMeta"), QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
 QString ReceiverUiBackend::play(QString streamUrl, QString stationName)

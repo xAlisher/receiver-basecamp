@@ -144,6 +144,21 @@ Item {
         var at = root.activeTopic
         return all.filter(function(s) { return (s.topic || "") === at })
     }
+    // #14 pinned stations (by pubkey), online/offline — survives reload
+    readonly property var pinnedList: {
+        if (!backend) return []
+        try { return JSON.parse(backend.pinnedJson) } catch (e) { return [] }
+    }
+    function isPinned(pubkey) {
+        if (!pubkey) return false
+        for (var i = 0; i < root.pinnedList.length; i++) if (root.pinnedList[i].pubkey === pubkey) return true
+        return false
+    }
+    function togglePin(pubkey) {
+        if (!backend || !pubkey) return
+        if (root.isPinned(pubkey)) logos.watch(backend.unpinStation(pubkey), function(){}, function(){})
+        else logos.watch(backend.pinStation(pubkey), function(){}, function(){})
+    }
 
     function startPlay(url, name) { if (backend) backend.play(url, name) }   // phase derives from the backend
     function stopPlay()           { if (backend) backend.stopPlayback() }
@@ -368,6 +383,57 @@ Item {
             }
         }
 
+        // ── #14 Pinned stations — above the topic search; survive reload; online/offline matched by pubkey ──
+        ColumnLayout {
+            Layout.fillWidth: true; spacing: Theme.spacing.tiny
+            visible: root.pinnedList.length > 0
+            LogosText { text: "Pinned stations"; color: root.textMuted; font.pixelSize: Theme.typography.secondaryText }
+            Repeater {
+                model: root.pinnedList
+                delegate: Rectangle {
+                    Layout.fillWidth: true
+                    height: (modelData.online && (modelData.nowPlaying || "").length > 0) ? 66 : 52
+                    radius: Theme.spacing.radiusMedium
+                    color: pinRowArea.containsMouse && modelData.online ? root.bgPrimary : root.rowBase
+                    opacity: modelData.online ? 1.0 : 0.55
+                    Rectangle {                          // dot: online → ok, offline → muted
+                        id: pdot
+                        anchors.left: parent.left; anchors.leftMargin: Theme.spacing.medium
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 8; height: 8; radius: 4; color: modelData.online ? root.ok : root.textMuted
+                    }
+                    Column {
+                        anchors.left: pdot.right; anchors.leftMargin: Theme.spacing.small
+                        anchors.right: unpinCtl.left; anchors.rightMargin: Theme.spacing.small
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 0
+                        LogosText { text: (modelData.name || "(unnamed)") + (modelData.online ? "" : " · offline")
+                               color: modelData.online ? root.textPrimary : root.textMuted
+                               font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint)
+                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { visible: modelData.online && (modelData.nowPlaying || "").length > 0
+                               text: "Playing now: " + (modelData.nowPlaying || "")
+                               color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                    }
+                    MouseArea {                          // row click → play (only when online)
+                        id: pinRowArea; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: modelData.online ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: if (modelData.online) root.startPlay(modelData.streamUrl, modelData.name)
+                    }
+                    LogosText {                          // unpin — declared last so it captures its own click
+                        id: unpinCtl
+                        anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "📌"; font.pixelSize: Theme.typography.secondaryText
+                        opacity: unpinArea.containsMouse ? 0.7 : 1.0
+                        MouseArea { id: unpinArea; anchors.fill: parent; anchors.margins: -4
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.togglePin(modelData.pubkey) }
+                    }
+                }
+            }
+        }
+
         // ── Add a private topic (#44: replaces the view; keeps the topic; ✕ returns to public) ──
         Item {
             id: topicRow
@@ -479,6 +545,20 @@ Item {
                         // #26 hovering a station = intent to play → pre-build its Tor circuit so Play is fast
                         onEntered: if (backend) backend.prewarm(modelData.streamUrl)
                         onClicked: root.startPlay(modelData.streamUrl, modelData.name)
+                    }
+                    // #14 pin toggle — verified stations only (pin anchors on pubkey). Declared after rowArea so
+                    // it sits on top and captures its own click without triggering play.
+                    LogosText {
+                        visible: (modelData.pubkey || "").length > 0
+                        anchors.right: statusText.left; anchors.rightMargin: Theme.spacing.small
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "📌"; font.pixelSize: Theme.typography.secondaryText
+                        opacity: root.isPinned(modelData.pubkey) ? 1.0 : (pinArea.containsMouse ? 0.7 : 0.3)
+                        MouseArea {
+                            id: pinArea; anchors.fill: parent; anchors.margins: -4
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.togglePin(modelData.pubkey)
+                        }
                     }
                 }
 
