@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 
 import Logos.Theme      // logos-design-system (native on RC3+ Basecamp) — skill: logos-design-system-adoption
 import Logos.Controls   // LogosText / LogosButton / LogosBadge / LogosSlider / LogosSwitch / LogosTextField
@@ -11,6 +12,59 @@ import Logos.Controls   // LogosText / LogosButton / LogosBadge / LogosSlider / 
 Item {
     id: root
     anchors.fill: parent
+
+    // #14 monochrome vector pin (Lucide "pin") — stroke follows iconColor; no image plugin needed.
+    // Paths live in a 24×24 space; the inner Shape is scaled to fill, the outer Item carries the click.
+    component PinIcon: Item {
+        id: pin
+        property color iconColor: root.textMuted
+        implicitWidth: 16; implicitHeight: 16
+        Shape {
+            anchors.fill: parent
+            transform: Scale { xScale: pin.width / 24; yScale: pin.height / 24 }
+            ShapePath {
+                strokeColor: pin.iconColor; strokeWidth: 2; fillColor: "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M12 17v5" }
+            }
+            ShapePath {
+                strokeColor: pin.iconColor; strokeWidth: 2; fillColor: "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" }
+            }
+        }
+    }
+    // Lucide "play" — rounded triangle. filled=true → solid (button affordance); else outline.
+    component PlayIcon: Item {
+        id: pl
+        property color iconColor: root.textMuted
+        property bool filled: false
+        implicitWidth: 14; implicitHeight: 14
+        Shape {
+            anchors.fill: parent
+            transform: Scale { xScale: pl.width / 24; yScale: pl.height / 24 }
+            ShapePath {
+                strokeColor: pl.iconColor; strokeWidth: 2; fillColor: pl.filled ? pl.iconColor : "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" }
+            }
+        }
+    }
+    // Lucide "square" — the stop control.
+    component StopIcon: Item {
+        id: sq
+        property color iconColor: root.textMuted
+        implicitWidth: 14; implicitHeight: 14
+        Shape {
+            anchors.fill: parent
+            transform: Scale { xScale: sq.width / 24; yScale: sq.height / 24 }
+            ShapePath {
+                strokeColor: sq.iconColor; strokeWidth: 2; fillColor: "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" }
+            }
+        }
+    }
 
     readonly property var backend: (typeof logos !== "undefined" && logos.module)
                                    ? logos.module("receiver_ui") : null
@@ -137,6 +191,12 @@ Item {
     // #44 a private topic REPLACES the view: selectedTopic ("" = public directory) → activeTopic filters the list
     property string selectedTopic: ""
     readonly property string activeTopic: selectedTopic.length > 0 ? selectedTopic : (backend ? backend.publicTopic : "")
+    // #4 friendly label for the directory indicator ("Public" or the private directory's <id>)
+    function directoryLabel() {
+        if (root.selectedTopic.length === 0) return "Public"
+        var m = root.selectedTopic.match(/\/radio-basecamp\/1\/([^/]+)\/json/)
+        return m ? m[1] : root.selectedTopic
+    }
     function stations() {
         if (!backend) return []
         var all
@@ -278,6 +338,51 @@ Item {
                 anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.spacing.small }
                 spacing: Theme.spacing.small
 
+                // #2/#3/#44 Private directory — subscribe to a private directory instead of the public one
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosText { text: "Private directory"; font.pixelSize: Theme.typography.primaryText }
+                    LogosText {
+                        text: "Paste a private directory to see only its stations. ✕ returns to the public directory."
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                    Item {
+                        id: dirRow
+                        Layout.fillWidth: true
+                        implicitHeight: dirField.implicitHeight
+                        readonly property string tt: dirField.text.trim()
+                        readonly property bool active: tt.length > 0 && tt === root.selectedTopic
+                        function submit() { if (backend && dirRow.tt.length) { backend.addTopic(dirRow.tt); root.selectedTopic = dirRow.tt } }
+                        LogosTextField {
+                            id: dirField
+                            width: parent.width
+                            placeholderText: "Private directory (/radio-basecamp/1/<id>/json)"
+                        }
+                        LogosButton {
+                            visible: dirRow.tt.length > 0 && !dirRow.active
+                            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.tiny }
+                            text: "Switch"; implicitHeight: Math.max(24, dirField.implicitHeight - 8)
+                            onClicked: dirRow.submit()
+                        }
+                        LogosText {
+                            visible: dirRow.active
+                            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.small }
+                            text: "✕"; font.pixelSize: Theme.typography.secondaryText
+                            color: dirClearArea.containsMouse ? root.accent : root.textMuted
+                            MouseArea { id: dirClearArea; anchors.fill: parent; anchors.margins: -6
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: { dirField.text = ""; root.selectedTopic = "" } }
+                        }
+                    }
+                    Connections {
+                        target: dirField.textInput
+                        function onAccepted() { var t = dirField.text.trim(); if (backend && t.length) { backend.addTopic(t); root.selectedTopic = t } }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
+
                 // Listener buffer
                 ColumnLayout {
                     Layout.fillWidth: true; spacing: Theme.spacing.tiny
@@ -404,7 +509,7 @@ Item {
                     }
                     Column {
                         anchors.left: pdot.right; anchors.leftMargin: Theme.spacing.small
-                        anchors.right: unpinCtl.left; anchors.rightMargin: Theme.spacing.small
+                        anchors.right: pinCtl.left; anchors.rightMargin: Theme.spacing.small
                         anchors.verticalCenter: parent.verticalCenter; spacing: 0
                         LogosText { text: (modelData.name || "(unnamed)") + (modelData.online ? "" : " · offline")
                                color: modelData.online ? root.textPrimary : root.textMuted
@@ -420,57 +525,56 @@ Item {
                         cursorShape: modelData.online ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: if (modelData.online) root.startPlay(modelData.streamUrl, modelData.name)
                     }
-                    LogosText {                          // unpin — declared last so it captures its own click
-                        id: unpinCtl
+                    Row {                                // right controls — declared last so they're on top of pinRowArea
+                        id: pinCtl
                         anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "📌"; font.pixelSize: Theme.typography.secondaryText
-                        opacity: unpinArea.containsMouse ? 0.7 : 1.0
-                        MouseArea { id: unpinArea; anchors.fill: parent; anchors.margins: -4
-                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: root.togglePin(modelData.pubkey) }
+                        anchors.verticalCenter: parent.verticalCenter; spacing: Theme.spacing.small
+                        PinIcon {                        // #1 pin LEFT of play — unpin (pinned → accent; hover gray = will remove)
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 15; height: 15
+                            iconColor: unpinArea.containsMouse ? root.textMuted : root.accent
+                            MouseArea { id: unpinArea; anchors.fill: parent; anchors.margins: -6
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: root.togglePin(modelData.pubkey) }
+                        }
+                        Rectangle {                      // play — circle green if live, gray if offline
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 26; height: 26; radius: 13
+                            color: (modelData.online && pinPlayArea.containsMouse) ? root.ok : "transparent"
+                            border.width: 1; border.color: modelData.online ? root.ok : root.textMuted
+                            PlayIcon {
+                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1
+                                width: 12; height: 12; filled: true
+                                iconColor: !modelData.online ? root.textMuted
+                                         : (pinPlayArea.containsMouse ? root.bgPrimary : root.ok)
+                            }
+                            MouseArea {
+                                id: pinPlayArea; anchors.fill: parent; hoverEnabled: true; enabled: modelData.online
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.startPlay(modelData.streamUrl, modelData.name)
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // ── Add a private topic (#44: replaces the view; keeps the topic; ✕ returns to public) ──
-        Item {
-            id: topicRow
-            Layout.fillWidth: true
-            implicitHeight: topicField.implicitHeight
-            readonly property string tt: topicField.text.trim()
-            readonly property bool active: tt.length > 0 && tt === root.selectedTopic   // submitted = current view
-            function submit() { if (backend && topicRow.tt.length) { backend.addTopic(topicRow.tt); root.selectedTopic = topicRow.tt } }
-            LogosTextField {
-                id: topicField
-                width: parent.width
-                placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
+        // #4 Directory indicator — the input now lives in Settings; the pencil opens it there
+        RowLayout {
+            Layout.fillWidth: true; spacing: Theme.spacing.small
+            LogosText {
+                text: "Directory: " + root.directoryLabel()
+                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
+                Layout.fillWidth: true; elide: Text.ElideRight
             }
-            LogosButton {                            // "Switch" — populated but not yet the active topic
-                visible: topicRow.tt.length > 0 && !topicRow.active
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.tiny }
-                text: "Switch"
-                implicitHeight: Math.max(24, topicField.implicitHeight - 8)
-                onClicked: topicRow.submit()
-            }
-            LogosText {                              // ✕ — active topic → clear back to the public directory
-                visible: topicRow.active
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.small }
-                text: "✕"; font.pixelSize: Theme.typography.secondaryText
-                color: clearArea.containsMouse ? root.accent : root.textMuted
+            LogosText {                              // ✎ edit → open Settings (where the directory input is)
+                text: "✎"; font.pixelSize: Theme.typography.secondaryText
+                color: dirEditArea.containsMouse ? root.accent : root.textMuted
                 MouseArea {
-                    id: clearArea; anchors.fill: parent; anchors.margins: -6
+                    id: dirEditArea; anchors.fill: parent; anchors.margins: -6
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: { topicField.text = ""; root.selectedTopic = "" }
+                    onClicked: root.settingsOpen = true
                 }
-            }
-        }
-        Connections {
-            target: topicField.textInput
-            function onAccepted() {
-                var t = topicField.text.trim()
-                if (backend && t.length) { backend.addTopic(t); root.selectedTopic = t }   // keep the text + switch the view to it
             }
         }
 
@@ -505,15 +609,15 @@ Item {
                         readonly property bool active: (root.nowPlaying === modelData.name)
                         width: active ? lbl.implicitWidth : 26
                         height: 26
-                        Rectangle {                     // circular play button (idle)
+                        Rectangle {                     // circular play button — unified green (matches pinned/live)
                             visible: !statusText.active
                             anchors.centerIn: parent; width: 26; height: 26; radius: 13
-                            color: rowArea.containsMouse ? root.accent : "transparent"
-                            border.width: 1; border.color: rowArea.containsMouse ? root.accent : root.borderColor
-                            LogosText {
-                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1  // optical: nudge ▶ right
-                                text: "▶"; font.pixelSize: Theme.typography.secondaryText
-                                color: rowArea.containsMouse ? root.bgPrimary : root.textMuted
+                            color: rowArea.containsMouse ? root.ok : "transparent"
+                            border.width: 1; border.color: root.ok
+                            PlayIcon {
+                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1  // optical nudge
+                                width: 12; height: 12; filled: true
+                                iconColor: rowArea.containsMouse ? root.bgPrimary : root.ok
                             }
                         }
                         LogosText {                     // status label (playing / caching)
@@ -548,14 +652,14 @@ Item {
                     }
                     // #14 pin toggle — verified stations only (pin anchors on pubkey). Declared after rowArea so
                     // it sits on top and captures its own click without triggering play.
-                    LogosText {
+                    PinIcon {                        // #6 gray by default → orange when pinned or hovered
                         visible: (modelData.pubkey || "").length > 0
                         anchors.right: statusText.left; anchors.rightMargin: Theme.spacing.small
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "📌"; font.pixelSize: Theme.typography.secondaryText
-                        opacity: root.isPinned(modelData.pubkey) ? 1.0 : (pinArea.containsMouse ? 0.7 : 0.3)
+                        width: 15; height: 15
+                        iconColor: (root.isPinned(modelData.pubkey) || pinArea.containsMouse) ? root.accent : root.textMuted
                         MouseArea {
-                            id: pinArea; anchors.fill: parent; anchors.margins: -4
+                            id: pinArea; anchors.fill: parent; anchors.margins: -6
                             hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: root.togglePin(modelData.pubkey)
                         }
@@ -659,12 +763,18 @@ Item {
                         }
                     }
                 }
-                LogosButton {   // #19: perfect-round stop icon
-                    text: "■"
+                LogosButton {   // #19: perfect-round stop button, Lucide "square" glyph
+                    id: stopBtn
+                    text: ""
                     implicitWidth: 30; implicitHeight: 30
                     radius: 15      // width/2 → perfect circle, not a rounded rect
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: root.stopPlay()
+                    StopIcon {
+                        anchors.centerIn: parent
+                        width: 12; height: 12
+                        iconColor: stopBtn.hovered ? root.accent : root.textPrimary
+                    }
                 }
             }
             // #32 rotate the connecting messages every ~4.5s; random start for variety; only while not live
