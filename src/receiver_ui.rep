@@ -11,7 +11,8 @@ class ReceiverUi
     PROP(QString stationsJson="[]" READONLY)                  // JSON array of live stations (TTL-pruned)
     PROP(QString nowPlaying="" READONLY)                      // station name currently playing ("" = stopped)
     PROP(bool    playbackLive=false READONLY)                 // ffplay master clock ticking = audio actually OUT
-                                                              // (true "playing"; false while connecting/buffering)
+    PROP(bool    buffering=false READONLY)                    // ffplay aq>0 = stream bytes arriving (caching);
+                                                              // buffering && !playbackLive = "Caching", neither = "Connecting"
 
     PROP(int     listenBuffer=8 READONLY)                     // listener jitter buffer, seconds (2–20)
     PROP(bool    hideCache=false READONLY)                    // privacy: suppress on-disk stream cache

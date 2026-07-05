@@ -301,7 +301,7 @@ QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
         log("playback failed: " + e);
         return e;
     }
-    log("playing \"" + nowPlaying() + "\"");
+    log("connecting to \"" + nowPlaying() + "\"");   // not "playing" yet — audio starts on the clock signal
     return QString();
 }
 
@@ -366,6 +366,7 @@ QString ReceiverUiBackend::startFfplay()
     // status line ("aq="); if none arrives within kNoAudioMs, the stream is stuck → reap Tor + retry.
     m_audioFlowing = false;
     setPlaybackLive(false);
+    setBuffering(false);
     connect(m_player, &QProcess::readyReadStandardError, this, [this] {
         if (m_audioFlowing && playbackLive()) return;   // both signals seen — nothing left to watch
         const QString e = QString::fromLatin1(m_player->readAllStandardError());
@@ -378,6 +379,7 @@ QString ReceiverUiBackend::startFfplay()
             while (it.hasNext()) {
                 if (it.next().captured(1).toInt() > 0) {
                     m_audioFlowing = true;
+                    setBuffering(true);   // #9 bytes arriving → UI "Caching" (was "Connecting")
                     if (m_watchdog) m_watchdog->stop();
                     diag(QStringLiteral("audio buffering (aq>0) — connect works"));
                     break;
@@ -391,6 +393,7 @@ QString ReceiverUiBackend::startFfplay()
             static const QRegularExpression liveRe(QStringLiteral("(?:^|[\\r\\n])\\s*[0-9]+\\.[0-9]+\\s+(?:M-A|A-V)"));
             if (liveRe.match(e).hasMatch()) {
                 setPlaybackLive(true);
+                log("▶ playing \"" + nowPlaying() + "\"");   // the honest "playing" — audio is actually out
                 diag(QStringLiteral("playback LIVE (ffplay master clock ticking) — audio is out"));
             }
         }
@@ -413,7 +416,7 @@ void ReceiverUiBackend::onNoAudioWatchdog()
         diag(QStringLiteral("no-audio watchdog: still no data after %1 reaps — stopping").arg(kMaxReaps));
         killPlayer(); killTorListen();
         m_playingUrl.clear(); setNowPlaying(QString());
-        log(QStringLiteral("couldn't connect — the station may be offline; try again"));
+        log(QStringLiteral("couldn't reach the station over Tor — its onion may be down; try again"));
         return;
     }
     // No stream bytes yet. The listener Tor may be stale (cached a failed HS-descriptor lookup when the
@@ -437,6 +440,7 @@ void ReceiverUiBackend::killPlayer()
 {
     if (m_watchdog) m_watchdog->stop();             // #23 cancel the no-audio watchdog for this player
     setPlaybackLive(false);                         // #9 no player → audio is not out (UI leaves "Playing")
+    setBuffering(false);                            // #9 no player → not buffering either
     if (!m_player) return;
     disconnect(m_player, nullptr, this, nullptr);   // intentional kill — don't fire the retry handler (#12)
     m_player->terminate();

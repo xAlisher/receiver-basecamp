@@ -34,9 +34,13 @@ Item {
     property bool settingsOpen: false
     property var  events: []
 
-    // #9 caching-on-play: idle | caching | playing — Caching shows a countdown over the buffer secs
-    property string playPhase: "idle"
-    property int    cacheLeft:  0
+    // #9 true play-state, DERIVED from the backend (never a timer):
+    //   connecting = Tor rendezvous, no bytes yet · caching = bytes arriving (aq>0) · playing = audio out (clock)
+    readonly property string playPhase:
+        (!backend || backend.nowPlaying.length === 0) ? "idle"
+        : backend.playbackLive ? "playing"
+        : backend.buffering    ? "caching"
+        : "connecting"
     readonly property color cachingYellow: Theme.palette.warning
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
@@ -51,46 +55,12 @@ Item {
         try { return JSON.parse(backend.stationsJson) } catch (e) { return [] }
     }
 
-    // #9 — enter the Caching phase (countdown over the listener buffer), then flip to Playing.
-    function startPlay(url, name) {
-        if (!backend) return
-        backend.play(url, name)
-        root.playPhase = "caching"
-        root.cacheLeft = Math.max(1, root.listenBuffer)
-        cacheTimer.restart()
-    }
-    function stopPlay() {
-        if (backend) backend.stopPlayback()
-        root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
-    }
-
-    // The countdown is now only a soft progress HINT. The flip to "Playing" is driven by the backend's
-    // playbackLive PROP (ffplay's real master clock = audio actually out), NOT this timer — so "Playing"
-    // never shows over silence. If the buffer estimate elapses first, we floor at 0 and stay "Caching…".
-    Timer {
-        id: cacheTimer; interval: 1000; repeat: true
-        onTriggered: { if (root.cacheLeft > 0) root.cacheLeft--; else cacheTimer.stop() }
-    }
+    function startPlay(url, name) { if (backend) backend.play(url, name) }   // phase derives from the backend
+    function stopPlay()           { if (backend) backend.stopPlayback() }
 
     Connections {
         target: backend
         ignoreUnknownSignals: true
-        // external stop / backend reports stopped → leave the caching/playing phase
-        function onNowPlayingChanged() {
-            if (backend && backend.nowPlaying.length === 0 && root.playPhase !== "idle") {
-                root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
-            }
-        }
-        // #9 true-state: ffplay's real audio clock drives the phase, not the countdown.
-        function onPlaybackLiveChanged() {
-            if (!backend) return
-            if (backend.playbackLive) {
-                root.playPhase = "playing"; cacheTimer.stop()          // audio is actually OUT
-            } else if (backend.nowPlaying.length > 0) {
-                root.playPhase = "caching"                             // dropped / reconnecting → honest "Caching…"
-                root.cacheLeft = Math.max(1, root.listenBuffer); cacheTimer.restart()
-            }
-        }
         function onActivity(line) {
             var next = root.events.slice()
             next.unshift("[" + Qt.formatTime(new Date(), "hh:mm:ss") + "] " + line)
@@ -293,8 +263,9 @@ Item {
                             id: lbl
                             visible: statusText.active
                             anchors.centerIn: parent
-                            text: root.playPhase === "caching" ? "caching…" : "playing"
-                            color: root.playPhase === "caching" ? root.cachingYellow : root.accent
+                            text: root.playPhase === "playing" ? "playing"
+                                : root.playPhase === "connecting" ? "connecting…" : "caching…"
+                            color: root.playPhase === "playing" ? root.accent : root.cachingYellow
                             font.pixelSize: Theme.typography.secondaryText
                         }
                     }
@@ -326,26 +297,14 @@ Item {
             }
         }
 
-        // ── Player bar (#9: breathing-yellow Caching… countdown → orange Playing) ──
+        // ── Player bar (#9: Connecting… / Caching… breathing-yellow → orange ▶ Playing) ──
         Rectangle {
             id: playerBar
             Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium; clip: true
             visible: root.nowPlaying.length > 0
-            readonly property bool caching: root.playPhase === "caching"
+            readonly property bool live: root.playPhase === "playing"   // audio actually out (ffplay clock)
             color: root.bgSecondary; border.width: 1
-            border.color: playerBar.caching ? root.cachingYellow : root.accent
-
-            // #19: caching progress fill — transparent yellow, grows left→right as the cache
-            // countdown completes ((buffer-left)/buffer). Behind the content; clipped to the bar.
-            Rectangle {
-                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                visible: playerBar.caching
-                width: playerBar.caching
-                       ? parent.width * Math.max(0, Math.min(1, (root.listenBuffer - root.cacheLeft) / Math.max(1, root.listenBuffer)))
-                       : 0
-                color: Qt.rgba(root.cachingYellow.r, root.cachingYellow.g, root.cachingYellow.b, 0.18)
-                Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.Linear } }
-            }
+            border.color: playerBar.live ? root.accent : root.cachingYellow
 
             RowLayout {
                 anchors { fill: parent; leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium
@@ -353,19 +312,21 @@ Item {
                 spacing: Theme.spacing.small
                 LogosText {
                     id: phaseSym
-                    text: playerBar.caching ? "◌" : "▶"
-                    color: playerBar.caching ? root.cachingYellow : root.accent
+                    text: playerBar.live ? "▶" : "◌"
+                    color: playerBar.live ? root.accent : root.cachingYellow
                     font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 10
                     horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
                     SequentialAnimation {
-                        id: breathe; running: playerBar.caching; loops: Animation.Infinite
+                        id: breathe; running: !playerBar.live; loops: Animation.Infinite   // breathe until audio is out
                         NumberAnimation { target: phaseSym; property: "opacity"; from: 1.0; to: 0.35; duration: 600 }
                         NumberAnimation { target: phaseSym; property: "opacity"; from: 0.35; to: 1.0; duration: 600 }
                         onRunningChanged: if (!running) phaseSym.opacity = 1
                     }
                 }
                 LogosText {
-                    text: playerBar.caching ? ("Caching… " + root.cacheLeft + "s · " + root.nowPlaying) : root.nowPlaying
+                    text: root.playPhase === "playing"    ? root.nowPlaying
+                        : root.playPhase === "connecting" ? ("Connecting… · " + root.nowPlaying)
+                        :                                   ("Caching… · " + root.nowPlaying)
                     font.pixelSize: Theme.typography.primaryText; Layout.fillWidth: true
                     elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
                 }
