@@ -65,23 +65,23 @@ Item {
     }
     readonly property var connectMsgs: [
         // — the vibe: patience over an onion connection —
-        "Tor connection can be slow — that's what protects the streamer's privacy",
-        "Connecting, hang loose",
-        "The only good system is a sound system",
-        "Radio waves are owned by governments — that's why we went p2p",
-        "No central server means decentralisation (and patience while we connect)",
-        "Routing through onion layers — three hops for your anonymity",
-        "No middlemen, no ads, no logs — just the signal",
-        "Building a circuit through volunteers' relays worldwide",
-        "Slow radio is free radio",
-        "Nobody knows who's listening. Not even us. That's the point",
-        "Can't be deplatformed if there's no platform",
-        "Handshaking with the hidden service",
-        "Patience is a small price for a station no one can shut down",
-        "The revolution will not be centralised",
+        "Tor connection can be slow — that's what protects the streamer's privacy.",
+        "Connecting, hang loose.",
+        "The only good system is a sound system.",
+        "Radio waves are owned by governments — that's why we went p2p.",
+        "No central server means decentralisation (and patience while we connect).",
+        "Routing through onion layers — three hops for your anonymity.",
+        "No middlemen, no ads, no logs — just the signal.",
+        "Building a circuit through volunteers' relays worldwide.",
+        "Slow radio is free radio.",
+        "Nobody knows who's listening. Not even us. That's the point.",
+        "Can't be deplatformed if there's no platform.",
+        "Handshaking with the hidden service.",
+        "Patience is a small price for a station no one can shut down.",
+        "The revolution will not be centralised.",
         // — this module's lineage —
-        "This module is inspired by “Farewell to Westphalia”, by Jarrad Hope & Peter Ludlow",
-        "Farewell to Westphalia: exit the nation-state, enter the network",
+        "This module is inspired by “Farewell to Westphalia”, by Jarrad Hope & Peter Ludlow.",
+        "Farewell to Westphalia: exit the nation-state, enter the network.",
         // — the OG cypherpunks —
         "“Cypherpunks write code.” — Eric Hughes",
         "“Privacy is necessary for an open society in the electronic age.” — Eric Hughes",
@@ -361,8 +361,11 @@ Item {
                     visible: list.count === 0
                     horizontalAlignment: Text.AlignHCenter
                     color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    text: root.discovering ? "Listening for stations…\nnone announced yet"
-                                           : "Starting discovery…"
+                    // #34 don't claim "none announced" until the network is actually up (badge not yellow/red)
+                    text: (root.status === "Connected" || root.status === "PartiallyConnected")
+                            ? (root.discovering ? "Listening for stations…\nnone announced yet" : "Starting discovery…")
+                        : root.status === "Disconnected" ? "Disconnected — retrying…"
+                        : "Connecting to the network…"
                 }
             }
         }
@@ -432,7 +435,7 @@ Item {
             // #32 rotate the connecting messages every ~4.5s; random start for variety; only while not live
             Timer {
                 id: msgRotate
-                interval: 4500; repeat: true
+                interval: 7000; repeat: true   // slow enough to read a full line (incl. wrapped quotes)
                 running: playerBar.visible && !playerBar.live
                 onRunningChanged: if (running) root.reshuffleMsgs()   // fresh shuffled bag each connect
                 onTriggered: root.nextMsg()
