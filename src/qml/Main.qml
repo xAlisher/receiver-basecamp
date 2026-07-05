@@ -102,17 +102,21 @@ Item {
     // #32 player-bar line 2 while playing: the station's host label + privacy (matches the list row)
     // #32 secondary line for a station (shared by the list row AND the player bar):
     //   onion → "Anonymous over Tor" (or "<host> over Tor"); otherwise "<host> · <privacy>".
-    function hostLine(host, privacy) {
-        var h = (host && host.length) ? host : "anonymous"
+    // #13/#24 secondary line. onion → "IP hidden by Tor" (a persistent fingerprint makes a station
+    // pseudonymous, not anonymous, so this is the honest framing); append " · <pgp words>" when the
+    // announce is signed + verified. Direct → "<host> · <privacy>" + the words when verified.
+    function hostLine(host, privacy, fingerprint) {
+        var fp = (fingerprint && fingerprint.length) ? " · " + fingerprint : ""
         if ((privacy || "").toLowerCase() === "onion")
-            return (h.toLowerCase() === "anonymous" ? "Anonymous" : h) + " over Tor"
-        return h + (privacy ? " · " + privacy : "")
+            return "IP hidden by Tor" + fp
+        var h = (host && host.length) ? host : "anonymous"
+        return h + (privacy ? " · " + privacy : "") + fp
     }
     function playingHostLine() {
         var ss = root.stations()
         for (var i = 0; i < ss.length; i++)
-            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy)
-        return "Anonymous over Tor"
+            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy, ss[i].fingerprint)
+        return "IP hidden by Tor"
     }
     // #40 current show of the station we're playing (for the player bar)
     function playingNowText() {
@@ -462,7 +466,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: root.hostLine(modelData.host, modelData.privacy)
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText {                     // #40 now-playing (from the announce; hidden when empty)
                                visible: (modelData.nowPlaying || "").length > 0

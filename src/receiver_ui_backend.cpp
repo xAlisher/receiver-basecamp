@@ -1,4 +1,5 @@
 #include "receiver_ui_backend.h"
+#include "station_identity.h"  // #13 verify announce signatures (secp256k1)
 #include "logos_sdk.h"        // generated: modules().delivery_module (Qt-typed) — #20 universal
 #include "logos_types.h"
 
@@ -250,6 +251,24 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
                      .remove(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]"))).left(120);
     s.lastSeenMs = QDateTime::currentMSecsSinceEpoch();
 
+    // #13 verify station identity. v:2 carries pubkey + sig over the canonical (sig-less) announce bytes;
+    // an invalid signature is a forgery/tamper → DROP. v:1 (unsigned) is kept as anonymous/unverified.
+    const int ver = o.value(QStringLiteral("v")).toInt(1);
+    const QString pubkey = o.value(QStringLiteral("pubkey")).toString();
+    const QString sig    = o.value(QStringLiteral("sig")).toString();
+    if (ver >= 2 && !pubkey.isEmpty() && !sig.isEmpty()) {
+        QJsonObject signedObj = o;
+        signedObj.remove(QStringLiteral("sig"));
+        const QByteArray canon = QJsonDocument(signedObj).toJson(QJsonDocument::Compact);
+        if (!StationIdentity::verify(pubkey, sig, canon)) {
+            log("dropped forged announce for \"" + s.name + "\" (bad signature)");
+            return;
+        }
+        s.pubkey      = pubkey;
+        s.fingerprint = StationIdentity::fingerprint(pubkey);
+        s.verified    = true;
+    }
+
     const QString key = s.topic + "|" + s.name;
     const bool isNew = !m_stations.contains(key);
     m_stations.insert(key, s);
@@ -283,6 +302,9 @@ void ReceiverUiBackend::publishStations()
         o["privacy"]   = s.privacy;
         o["topic"]     = s.topic;
         o["nowPlaying"] = s.nowPlaying;   // #40
+        o["verified"]   = s.verified;     // #13 identity
+        o["pubkey"]     = s.pubkey;
+        o["fingerprint"] = s.fingerprint;
         o["uptimeS"]   = (double)((now - s.lastSeenMs) / 1000);
         arr.append(o);
     }
