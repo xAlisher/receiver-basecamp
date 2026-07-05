@@ -102,6 +102,11 @@ void ReceiverUiBackend::wireDeliveryEvents()
     // messageReceived → announce ingest. connectionStateChanged → the status pill (d[0] =
     // "Connected"|"PartiallyConnected"|"Disconnected"). Typed modules().delivery_module.on(name, cb).
     modules().delivery_module.on("messageReceived", [this](const QVariantList& d) {
+        // A received announce PROVES the node is connected + discovering. The connectionStateChanged
+        // "Connected" event can fire during the fire-and-forget startup window BEFORE we subscribe (#20),
+        // so it's missed and the pill sticks at "connecting" even while announces flow. Upgrade it here.
+        if (connectionStatus() == QLatin1String("connecting") || connectionStatus() == QLatin1String("initializing"))
+            setConnectionStatus(QStringLiteral("Connected"));
         diag(QStringLiteral("on messageReceived: d.size=%1").arg(d.size()));
         for (const QVariant& v : d) ingestAnnounce(v);
     });
