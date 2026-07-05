@@ -146,6 +146,7 @@ Item {
         // — this module's lineage —
         "This module is inspired by “Farewell to Westphalia”, by Jarrad Hope & Peter Ludlow.",
         "Farewell to Westphalia: exit the nation-state, enter the network.",
+        "“Exit is culture.” — Alisher Sherali",
         // — the OG cypherpunks —
         "“Cypherpunks write code.” — Eric Hughes",
         "“Privacy is necessary for an open society in the electronic age.” — Eric Hughes",
@@ -158,7 +159,8 @@ Item {
         "“Cryptography is the ultimate form of non-violent direct action.” — Julian Assange",
         "“The universe believes in encryption.” — Julian Assange",
         "“If privacy is outlawed, only outlaws will have privacy.” — Phil Zimmermann",
-        "“Trusted third parties are security holes.” — Nick Szabo"
+        "“Trusted third parties are security holes.” — Nick Szabo",
+        "“Privacy is normal? It sounds so boring and dull. No, privacy is exceptional. It's special.” — Amir Taaki"
     ]
     // #32 player-bar line 2 while playing: the station's host label + privacy (matches the list row)
     // #32 secondary line for a station (shared by the list row AND the player bar):
