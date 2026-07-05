@@ -50,7 +50,7 @@ Item {
             }
         }
     }
-    // Lucide "square" — the stop control.
+    // Lucide "square" — the stop control. Filled + rounded (same style as the filled play).
     component StopIcon: Item {
         id: sq
         property color iconColor: root.textMuted
@@ -59,9 +59,9 @@ Item {
             anchors.fill: parent
             transform: Scale { xScale: sq.width / 24; yScale: sq.height / 24 }
             ShapePath {
-                strokeColor: sq.iconColor; strokeWidth: 2; fillColor: "transparent"
+                strokeColor: sq.iconColor; strokeWidth: 2; fillColor: sq.iconColor
                 capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
-                PathSvg { path: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" }
+                PathSvg { path: "M6.5 4h11a2.5 2.5 0 0 1 2.5 2.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11A2.5 2.5 0 0 1 6.5 4z" }
             }
         }
     }
@@ -559,23 +559,26 @@ Item {
             }
         }
 
-        // #4 Directory indicator — the input now lives in Settings; the pencil opens it there
+        // #4 Directory indicator (H2 subtitle) — input lives in Settings; ✎ (right after the name) opens it
         RowLayout {
             Layout.fillWidth: true; spacing: Theme.spacing.small
             LogosText {
                 text: "Directory: " + root.directoryLabel()
-                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
-                Layout.fillWidth: true; elide: Text.ElideRight
+                color: root.textPrimary
+                font.pixelSize: Theme.typography.panelTitleText; font.weight: Theme.typography.weightBold
+                elide: Text.ElideRight
             }
-            LogosText {                              // ✎ edit → open Settings (where the directory input is)
-                text: "✎"; font.pixelSize: Theme.typography.secondaryText
+            LogosText {                              // ✎ edit → open Settings — right after the label, not far right
+                text: "✎"; font.pixelSize: Theme.typography.primaryText
                 color: dirEditArea.containsMouse ? root.accent : root.textMuted
+                Layout.alignment: Qt.AlignVCenter
                 MouseArea {
                     id: dirEditArea; anchors.fill: parent; anchors.margins: -6
                     hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: root.settingsOpen = true
                 }
             }
+            Item { Layout.fillWidth: true }          // filler keeps label + ✎ left-aligned
         }
 
         // ── Station list ──
@@ -636,12 +639,12 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint)
-                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText {                     // #40 now-playing (from the announce; hidden when empty)
+                        LogosText {                     // #40 now-playing (swapped above the identity line)
                                visible: (modelData.nowPlaying || "").length > 0
                                text: "Playing now: " + (modelData.nowPlaying || "")
                                color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint)
+                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
@@ -697,13 +700,20 @@ Item {
                 anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
                           leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium }
                 spacing: Theme.spacing.small
-                LogosText {
+                Item {
                     id: phaseSym
-                    text: playerBar.live ? "▶" : "●"      // filled dot while connecting, ▶ when playing
-                    color: playerBar.live ? root.accent : root.cachingYellow
-                    font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 12
-                    horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: 12; implicitHeight: 12
+                    Layout.preferredWidth: 12; Layout.alignment: Qt.AlignVCenter
                     transformOrigin: Item.Center
+                    LogosText {                            // connecting → breathing filled dot
+                        anchors.centerIn: parent; visible: !playerBar.live
+                        text: "●"; color: root.cachingYellow; font.pixelSize: Theme.typography.secondaryText
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    PlayIcon {                             // playing → vector play (matches the list)
+                        anchors.centerIn: parent; visible: playerBar.live
+                        width: 11; height: 11; filled: true; iconColor: root.accent
+                    }
                     // prominent breath: fade + pulse the filled dot until audio is out
                     SequentialAnimation {
                         id: breathe; running: !playerBar.live; loops: Animation.Infinite
@@ -725,7 +735,13 @@ Item {
                         font.pixelSize: Theme.typography.primaryText
                         width: parent.width; elide: Text.ElideRight
                     }
-                    LogosText {                    // line 2 — host·privacy when playing, rotating msg while connecting
+                    LogosText {                    // #40 now-playing — swapped above the identity line
+                        visible: playerBar.live && root.playingNowText().length > 0
+                        text: "Playing now: " + root.playingNowText()
+                        color: root.accent; font.pixelSize: Theme.typography.secondaryText
+                        width: parent.width; elide: Text.ElideRight
+                    }
+                    LogosText {                    // identity/host when playing, rotating msg while connecting
                         text: playerBar.live ? root.playingHostLine()
                             : root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
                         color: playerBar.live ? root.textSecondary : root.cachingYellow
@@ -733,12 +749,6 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                         Behavior on opacity { NumberAnimation { duration: 250 } }
-                    }
-                    LogosText {                    // #40 line 3 — now-playing show (while playing, if announced)
-                        visible: playerBar.live && root.playingNowText().length > 0
-                        text: "Playing now: " + root.playingNowText()
-                        color: root.accent; font.pixelSize: Theme.typography.secondaryText
-                        width: parent.width; elide: Text.ElideRight
                     }
                 }
                 // #38 small animated soundwave near the stop button — centred rounded bars, wave-shaped
