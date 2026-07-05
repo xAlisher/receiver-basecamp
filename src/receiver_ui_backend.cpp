@@ -13,6 +13,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -25,7 +26,9 @@ constexpr int    kPruneMs     = 5000;
 constexpr int    kMaxPlayRetry = 2;      // auto-retries after ffplay self-exits before giving up (#12)
 constexpr qint64 kStablePlayMs = 45000;  // played this long before exiting ⇒ was healthy → reset retry budget
 constexpr int    kRetryBackoffMs = 1500; // brief backoff before a retry (let the reaped Tor's port free)
-constexpr int    kNoAudioMs      = 12000; // #23 no audio within this window ⇒ stuck (Tor cold-start) → retry
+constexpr int    kNoAudioMs      = 30000; // #23 no audio in this window ⇒ stuck (stale Tor) → reap+retry.
+                                          // Must exceed a FRESH tor's bootstrap+connect (~25s, measured) so
+                                          // the retry's own tor isn't reaped before it can land audio.
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -361,10 +364,19 @@ QString ReceiverUiBackend::startFfplay()
     connect(m_player, &QProcess::readyReadStandardError, this, [this] {
         if (m_audioFlowing) return;
         const QByteArray e = m_player->readAllStandardError();
-        if (e.contains("aq=") || e.contains("A-V:") || e.contains("M-A:")) {
-            m_audioFlowing = true;
-            if (m_watchdog) m_watchdog->stop();
-            diag(QStringLiteral("audio flowing (ffplay decode stats seen)"));
+        // ffplay -stats prints "… aq=  <N>KB …" on \r-updated lines. Require a NON-ZERO audio queue —
+        // ffplay actually pulled stream data. The initial "aq= 0KB" line prints even when the onion/HLS
+        // is stuck with NO data, so matching a bare "aq=" false-cancels the watchdog (observed: ffplay at
+        // 0.2% CPU, no sink-input, yet "audio flowing" logged → no retry → silence). #23
+        static const QRegularExpression aqRe(QStringLiteral("aq=\\s*([0-9]+)KB"));
+        auto it = aqRe.globalMatch(QString::fromLatin1(e));
+        while (it.hasNext()) {
+            if (it.next().captured(1).toInt() > 0) {
+                m_audioFlowing = true;
+                if (m_watchdog) m_watchdog->stop();
+                diag(QStringLiteral("audio flowing (ffplay aq>0)"));
+                break;
+            }
         }
     });
     if (!m_watchdog) {
