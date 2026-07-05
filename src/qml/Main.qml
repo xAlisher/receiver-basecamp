@@ -506,7 +506,7 @@ Item {
                 model: root.pinnedList
                 delegate: Rectangle {
                     Layout.fillWidth: true
-                    height: (modelData.online && (modelData.nowPlaying || "").length > 0) ? 66 : 52
+                    height: (modelData.online && (modelData.nowPlaying || "").length > 0) ? 76 : 56
                     radius: Theme.spacing.radiusMedium
                     color: pinRowArea.containsMouse && modelData.online ? root.bgPrimary : root.rowBase
                     opacity: modelData.online ? 1.0 : 0.55
@@ -519,15 +519,15 @@ Item {
                     Column {
                         anchors.left: pdot.right; anchors.leftMargin: Theme.spacing.small
                         anchors.right: pinCtl.left; anchors.rightMargin: Theme.spacing.small
-                        anchors.verticalCenter: parent.verticalCenter; spacing: 0
+                        anchors.verticalCenter: parent.verticalCenter; spacing: Theme.spacing.tiny
                         LogosText { text: (modelData.name || "(unnamed)") + (modelData.online ? "" : " · offline")
                                color: modelData.online ? root.textPrimary : root.textMuted
                                font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
-                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { visible: modelData.online && (modelData.nowPlaying || "").length > 0
                                text: "Playing now: " + (modelData.nowPlaying || "")
                                color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
+                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {                          // row click → play (only when online)
                         id: pinRowArea; anchors.fill: parent; hoverEnabled: true
@@ -551,16 +551,26 @@ Item {
                             width: 26; height: 26
                             anchors.verticalCenter: parent.verticalCenter
                             readonly property bool active: (root.nowPlaying === modelData.name)
-                            LogosText {                   // state dot: breathing yellow (loading) → green (playing)
-                                visible: pinState.active
-                                anchors.centerIn: parent; text: "●"
-                                color: root.playPhase === "playing" ? root.ok : root.cachingYellow
+                            LogosText {                   // active + loading → breathing yellow dot
+                                id: pinDot
+                                visible: pinState.active && root.playPhase !== "playing"
+                                anchors.centerIn: parent; text: "●"; color: root.cachingYellow
                                 font.pixelSize: Theme.typography.primaryText; transformOrigin: Item.Center
                                 SequentialAnimation on opacity {
-                                    running: pinState.active && root.playPhase !== "playing"; loops: Animation.Infinite
+                                    running: pinDot.visible; loops: Animation.Infinite
                                     NumberAnimation { from: 1.0; to: 0.3; duration: 750; easing.type: Easing.InOutSine }
                                     NumberAnimation { from: 0.3; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
                                 }
+                            }
+                            Rectangle {                   // active + playing → STOP button
+                                visible: pinState.active && root.playPhase === "playing"
+                                anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                                color: pinStopArea.containsMouse ? root.accent : "transparent"
+                                border.width: 1; border.color: root.accent
+                                StopIcon { anchors.centerIn: parent; width: 11; height: 11
+                                    iconColor: pinStopArea.containsMouse ? root.bgPrimary : root.accent }
+                                MouseArea { id: pinStopArea; anchors.fill: parent; hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                             }
                             Rectangle {                   // play circle (when not the active playback)
                                 visible: !pinState.active
@@ -619,7 +629,7 @@ Item {
                 model: root.stations()
                 delegate: Rectangle {
                     width: list.width; radius: Theme.spacing.radiusMedium
-                    height: (modelData.nowPlaying || "").length > 0 ? 66 : 52   // #40 taller for the now-playing line
+                    height: (modelData.nowPlaying || "").length > 0 ? 76 : 56   // #40 taller for the now-playing line + line spacing
                     // recessed row inset (surfaceRecessed, subtle vs the panel); hover lifts to the page bg
                     color: rowArea.containsMouse ? root.bgPrimary : root.rowBase
                     // anchor-based row — deterministic positions, no RowLayout slack distribution
@@ -649,26 +659,35 @@ Item {
                                 iconColor: rowArea.containsMouse ? root.bgPrimary : root.ok
                             }
                         }
-                        LogosText {                     // #6 active → state dot: breathing yellow (loading) → green (playing)
+                        LogosText {                     // #6 active + loading → breathing yellow dot
                             id: lbl
-                            visible: statusText.active
+                            visible: statusText.active && root.playPhase !== "playing"
                             anchors.centerIn: parent
-                            text: "●"
-                            color: root.playPhase === "playing" ? root.ok : root.cachingYellow
+                            text: "●"; color: root.cachingYellow
                             font.pixelSize: Theme.typography.primaryText
                             transformOrigin: Item.Center
                             SequentialAnimation on opacity {
-                                running: statusText.active && root.playPhase !== "playing"; loops: Animation.Infinite
+                                running: lbl.visible; loops: Animation.Infinite
                                 NumberAnimation { from: 1.0; to: 0.3; duration: 750; easing.type: Easing.InOutSine }
                                 NumberAnimation { from: 0.3; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
                             }
+                        }
+                        Rectangle {                     // active + playing → STOP button (stop from the row)
+                            visible: statusText.active && root.playPhase === "playing"
+                            anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                            color: stopArea.containsMouse ? root.accent : "transparent"
+                            border.width: 1; border.color: root.accent
+                            StopIcon { anchors.centerIn: parent; width: 11; height: 11
+                                iconColor: stopArea.containsMouse ? root.bgPrimary : root.accent }
+                            MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                         }
                     }
                     Column {                     // name + host, exactly small-gap right of the dot
                         anchors.left: dot.right; anchors.leftMargin: Theme.spacing.small
                         anchors.right: statusText.left; anchors.rightMargin: Theme.spacing.small
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: 0
+                        spacing: Theme.spacing.tiny
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText {                     // #40 now-playing (swapped above the identity line)
                                visible: (modelData.nowPlaying || "").length > 0
@@ -722,21 +741,28 @@ Item {
             visible: root.nowPlaying.length > 0 && (root.playPhase === "connecting" || root.playPhase === "caching")
             implicitHeight: loadCol.implicitHeight + 2 * Theme.spacing.medium
             Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
-            color: root.bgSecondary; border.width: 1; border.color: root.cachingYellow
+            color: root.bgSecondary; border.width: 1; border.color: root.borderColor
             ColumnLayout {
                 id: loadCol
                 anchors.centerIn: parent; width: parent.width - 2 * Theme.spacing.medium
-                spacing: Theme.spacing.tiny
-                LogosText {                        // small — "Connecting to station…" with animated dots
+                spacing: Theme.spacing.small
+                // "Connecting to station" stays put; the dots animate in a fixed-width slot so nothing jumps
+                Row {
                     Layout.alignment: Qt.AlignHCenter
-                    text: (root.playPhase === "caching" ? "Caching from station" : "Connecting to station") + root.loadingDots
-                    color: root.cachingYellow; font.pixelSize: Theme.typography.secondaryText
-                    horizontalAlignment: Text.AlignHCenter
+                    LogosText {
+                        text: root.playPhase === "caching" ? "Caching from station" : "Connecting to station"
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    }
+                    LogosText {
+                        width: 18                  // reserves space for "…" so the centered label doesn't shift
+                        text: root.loadingDots
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    }
                 }
-                LogosText {                        // bigger — the patience/cypherpunk lines, centered
+                LogosText {                        // patience lines — white + bigger, centered
                     Layout.fillWidth: true
                     text: root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
-                    color: root.textSecondary; font.pixelSize: Theme.typography.primaryText
+                    color: root.textPrimary; font.pixelSize: Theme.typography.panelTitleText
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
                     Behavior on opacity { NumberAnimation { duration: 250 } }
                 }
@@ -788,7 +814,7 @@ Item {
                     }
                 }
                 Column {   // #32 two lines, like the station row
-                    Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; spacing: 0
+                    Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; spacing: Theme.spacing.tiny
                     LogosText {                    // line 1 — always the station name
                         text: root.nowPlaying
                         font.pixelSize: Theme.typography.primaryText
