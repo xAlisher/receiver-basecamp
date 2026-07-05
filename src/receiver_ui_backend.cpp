@@ -99,6 +99,7 @@ void ReceiverUiBackend::onContextReady()
     // connectionStateChanged that delivery emits DURING createNode reenters this single ui-host thread
     // while it's blocked on createNode's reply → deadlock (sync-ipc-reentrancy). See wireDeliveryEvents().
     diag(QStringLiteral("onContextReady: modules() wired"));
+    setPublicTopic(directoryTopic());   // #44 expose the public directory topic for the list filter
     QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire deferred startDiscovery")); startDiscovery(); });
 }
 

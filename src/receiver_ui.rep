@@ -7,6 +7,7 @@ class ReceiverUi
     PROP(bool    nodeReady=false READONLY)                    // createNode + start succeeded
     PROP(QString torStatus="off" READONLY)                    // #37 listener Tor: off|booting|ready|failed (from tor.log bootstrap %)
     PROP(bool    discovering=false READONLY)                  // subscribed to the directory topic
+    PROP(QString publicTopic="" READONLY)                     // #44 the public directory topic (for the list filter)
     PROP(QString lastError="" READONLY)
 
     PROP(QString stationsJson="[]" READONLY)                  // JSON array of live stations (TTL-pruned)
