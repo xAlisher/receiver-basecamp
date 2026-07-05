@@ -58,6 +58,7 @@ private:
     void killPlayer();
     QString startFfplay();
     void    retryOrStopPlayback(qint64 ranMs);   // ffplay self-exited: reap Tor + retry, or give up (#12)
+    void    onNoAudioWatchdog();                 // ffplay running but silent → reap Tor + retry (#23)
     QString ensureTorListen();          // spawn a listener tor (SocksPort) for .onion playback
     void    killTorListen();
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
@@ -72,6 +73,8 @@ private:
     int           m_listenSocksPort = 0;
     qint64        m_playStartMs = 0;    // when the current ffplay started (retry timing, #12)
     int           m_playAttempt = 0;    // consecutive auto-retries for the current station (#12)
+    QTimer*       m_watchdog    = nullptr;  // #23 no-audio watchdog (single-shot per play attempt)
+    bool          m_audioFlowing = false;   // #23 ffplay emitted decode stats → real audio is flowing
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;
