@@ -28,8 +28,10 @@ constexpr qint64 kStablePlayMs = 45000;  // played this long before exiting ⇒ 
 constexpr int    kRetryBackoffMs = 1500; // brief backoff before a retry (let the reaped Tor's port free)
 constexpr int    kNoAudioMs      = 35000; // #23 first stall window — long enough that a fresh cold Tor
                                           // (~25s bootstrap+connect, measured) isn't reaped before it lands.
-constexpr int    kPatientMs      = 55000; // #23 after ONE reap, wait patiently for the fresh Tor — reaping
-                                          // again just churns (kills each tor mid-bootstrap → never connects).
+constexpr int    kPatientMs      = 55000; // #23 per-reap patient window — a fresh Tor's rendezvous can take
+                                          // anywhere from ~10s to >55s, so give each reaped Tor a full window.
+constexpr int    kMaxReaps       = 3;     // #23 reap up to this many times before giving up — a LIVE station
+                                          // connects within a retry or two; one window is too eager (false "unreachable").
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -290,7 +292,7 @@ QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
     }
     m_playingUrl = streamUrl;
     m_playAttempt = 0;   // fresh user-initiated play → reset the auto-retry budget (#12)
-    m_reapedOnce = false;   // #23 fresh play → the one-reap allowance resets
+    m_reapCount = 0;   // #23 fresh play → reset the reap budget
     setNowPlaying(stationName.isEmpty() ? streamUrl : stationName);
     const QString e = startFfplay();
     if (!e.isEmpty()) {
@@ -398,30 +400,32 @@ QString ReceiverUiBackend::startFfplay()
         m_watchdog->setSingleShot(true);
         QObject::connect(m_watchdog, &QTimer::timeout, this, &ReceiverUiBackend::onNoAudioWatchdog);
     }
-    m_watchdog->start(m_reapedOnce ? kPatientMs : kNoAudioMs);  // patient window after the one reap
+    m_watchdog->start(m_reapCount > 0 ? kPatientMs : kNoAudioMs);  // patient window after the first reap
     return QString();
 }
 
 void ReceiverUiBackend::onNoAudioWatchdog()
 {
     if (m_playingUrl.isEmpty() || m_audioFlowing) return;   // stopped, or audio came through
-    if (m_reapedOnce) {
-        // Already reaped once and gave the FRESH Tor a full patient window — still silent. Reaping again
-        // just churns (each new Tor is killed mid-bootstrap and never connects). Stop and let the user retry.
-        diag(QStringLiteral("no-audio watchdog: fresh Tor still silent after patient window — giving up"));
+    if (m_reapCount >= kMaxReaps) {
+        // Reaped kMaxReaps times, each with a full patient window, still no stream bytes — the broadcaster
+        // is very likely offline (a LIVE station connects within a retry or two). Stop; the user can retry.
+        diag(QStringLiteral("no-audio watchdog: still no data after %1 reaps — stopping").arg(kMaxReaps));
         killPlayer(); killTorListen();
         m_playingUrl.clear(); setNowPlaying(QString());
-        log(QStringLiteral("no sound — station unreachable, try again"));
+        log(QStringLiteral("couldn't connect — the station may be offline; try again"));
         return;
     }
-    // First stall: the listener Tor may be stale (cached a failed HS-descriptor lookup when the broadcaster
-    // was briefly dark) — measured: same ffplay is 9s on a fresh Tor vs >125s on the stale one. Reap it ONCE
-    // for a clean circuit, then wait patiently (kPatientMs) — do NOT churn.
-    m_reapedOnce = true;
-    diag(QStringLiteral("no-audio watchdog fired — reap stale Tor once, then patient retry"));
-    log(QStringLiteral("no sound yet — reconnecting"));
+    // No stream bytes yet. The listener Tor may be stale (cached a failed HS-descriptor lookup when the
+    // broadcaster was briefly dark — measured: same ffplay is 9s on a fresh Tor vs >125s on the stale one),
+    // or the fresh Tor's rendezvous is just slow. Reap for a clean circuit and wait a full patient window;
+    // repeat up to kMaxReaps before concluding the station is down — one window is too eager.
+    ++m_reapCount;
+    diag(QStringLiteral("no-audio watchdog fired — reap Tor %1/%2, patient retry").arg(m_reapCount).arg(kMaxReaps));
+    log(m_reapCount == 1 ? QStringLiteral("no sound yet — reconnecting")
+                         : QStringLiteral("still connecting…"));
     killPlayer();          // disconnects the finished handler so the reap doesn't also trip #21
-    killTorListen();       // drop the stale Tor → ensureTorListen() spawns a fresh one on the retry
+    killTorListen();       // drop this Tor → ensureTorListen() spawns a fresh one on the retry
     QTimer::singleShot(kRetryBackoffMs, this, [this] {
         if (m_playingUrl.isEmpty()) return;   // user stopped during the backoff
         const QString e = startFfplay();
