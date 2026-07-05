@@ -441,7 +441,7 @@ Item {
                     color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
                     // #34 don't claim "none announced" until the network is actually up (badge not yellow/red)
                     text: (root.status === "Connected" || root.status === "PartiallyConnected")
-                            ? (root.discovering ? "Listening for stations…\nnone announced yet" : "Starting discovery…")
+                            ? (root.discovering ? "Listening for stations…" : "Starting discovery…")
                         : root.status === "Disconnected" ? "Disconnected — retrying…"
                         : "Connecting to the network…"
                 }
@@ -458,34 +458,6 @@ Item {
             readonly property bool live: root.playPhase === "playing"   // audio actually out (ffplay clock)
             color: root.bgSecondary; border.width: 1
             border.color: playerBar.live ? root.accent : root.cachingYellow
-
-            // #38 fake EQ visualiser — low-alpha accent bars bounce along the bottom while playing,
-            // behind the text. Decorative (no real FFT — ffplay owns the audio out of process). Each bar
-            // desyncs via a per-index duration, so it reads as a spectrum without matching frequencies.
-            Row {
-                id: eqRow
-                visible: playerBar.live
-                anchors { left: parent.left; right: parent.right; bottom: parent.bottom
-                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; bottomMargin: 5 }
-                height: 18
-                spacing: 3
-                Repeater {
-                    model: 16
-                    delegate: Rectangle {
-                        width: (eqRow.width - 15 * eqRow.spacing) / 16
-                        anchors.bottom: parent.bottom
-                        radius: 1
-                        color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.22)   // same transparent tone as the old cache fill
-                        readonly property real hi: eqRow.height * (0.30 + 0.70 * Math.abs(Math.sin(index * 1.7)))  // varied max per bar (deterministic)
-                        height: 2
-                        SequentialAnimation on height {
-                            running: eqRow.visible; loops: Animation.Infinite
-                            NumberAnimation { to: hi; duration: 260 + (index * 43) % 420; easing.type: Easing.InOutSine }
-                            NumberAnimation { to: 2;  duration: 220 + (index * 67) % 380; easing.type: Easing.InOutSine }
-                        }
-                    }
-                }
-            }
 
             RowLayout {
                 id: barRow
@@ -528,6 +500,29 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                         Behavior on opacity { NumberAnimation { duration: 250 } }
+                    }
+                }
+                // #38 small animated soundwave near the stop button — centred rounded bars, wave-shaped
+                // (tall in the middle), gently bouncing while playing. Decorative (no real FFT).
+                Row {
+                    id: wave
+                    visible: playerBar.live
+                    Layout.alignment: Qt.AlignVCenter
+                    height: 22; spacing: 2
+                    Repeater {
+                        model: 11
+                        delegate: Rectangle {
+                            width: 2.5; radius: width / 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: root.accent
+                            readonly property real hi: 5 + (wave.height - 7) * Math.sin(Math.PI * (index + 0.5) / 11)  // wave: tall centre
+                            height: 4
+                            SequentialAnimation on height {
+                                running: wave.visible; loops: Animation.Infinite
+                                NumberAnimation { to: hi; duration: 300 + (index * 51) % 360; easing.type: Easing.InOutSine }
+                                NumberAnimation { to: 4;  duration: 280 + (index * 37) % 340; easing.type: Easing.InOutSine }
+                            }
+                        }
                     }
                 }
                 LogosButton {   // #19: perfect-round stop icon
