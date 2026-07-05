@@ -1,6 +1,6 @@
 {
   "name": "receiver_ui",
-  "version": "0.2.0.1",
+  "version": "0.2.0.2",
   "type": "ui_qml",
   "interface": "universal",
   "category": "messaging",
@@ -12,7 +12,7 @@
   "codegen": { "rep": "src/receiver_ui.rep" },
 
   "nix": {
-    "packages": { "build": ["pkg-config"], "runtime": ["tor", "torsocks", "ffmpeg", "secp256k1"] },
+    "packages": { "build": ["pkg-config"], "runtime": ["tor", "torsocks", "ffmpeg", "privoxy", "secp256k1"] },
     "external_libraries": [],
     "cmake": {
       "find_packages": [],

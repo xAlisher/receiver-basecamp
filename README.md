@@ -5,8 +5,8 @@ A lightweight **listen-only** Logos Basecamp module: discover decentralized radi
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
 the delivery client lives in the **ui-host** process. Interops with live `radio-basecamp` hosts.
 
-> **📦 Install:** grab the signed **[v0.2.0.1 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.0.1)**
-> (`receiver_ui-0.2.0.1-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **📦 Install:** grab the signed **[v0.2.0.2 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.0.2)**
+> (`receiver_ui-0.2.0.2-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
 > Universal API (`modules().delivery_module`), no legacy `getClient`. Validated on Basecamp v0.2.0:
 > discovery + connection pill + `.onion` audio.
 
@@ -53,42 +53,49 @@ pinned to 268 until the v0.2 bootstrap fix. Kept for archaeology.
 
 ---
 
-## macOS (arm64) — verified working (relay architecture)
+## macOS (arm64) — verified working on released v0.2.1
 
-**Status (2026-06-12): discovery + Tor playback work end-to-end on macOS**, on a Basecamp host built
-with **cpp-sdk ≥ #68** (merged 2026-06-08). The earlier "delivery events never dispatch on mac" wall was
-**not** a platform limitation — it was a *stale host cpp-sdk*. cpp-sdk **#68** ("marshal provider events
-onto the source thread") makes cross-module `messageReceived` dispatch reliably on macOS. Full
-investigation + data: **[#5](https://github.com/xAlisher/receiver-basecamp/issues/5)** and
-[`research/delivery-on-mac/journal.md`](research/delivery-on-mac/journal.md).
+**Status (2026-07-05): the universal `receiver_ui` runs on the released macOS Basecamp `v0.2.1`** —
+discovery, station-identity verification, pin, and `.onion` playback all work on an Apple-Silicon Mac.
+(The old "relay architecture" + "needs a `logos-app master` host" notes are obsolete: the #20 universal-API
+migration collapsed the relay into a single QtRO-backed `receiver_ui`, and the released v0.2.1 host runs it.)
 
-macOS uses the **relay architecture** (this branch): a `type:core` **`receiver_relay`** receives delivery
-in a `logos_host` sidecar (where events dispatch), and a **pure-QML** **`receiver_ui`** polls it via
-`logos.callModule`. `.onion` playback routes through a **privoxy** HTTP→SOCKS bridge in front of the
-listener Tor — macOS has no working `torsocks` (LD_PRELOAD is SIP-blocked;
-[#7](https://github.com/xAlisher/receiver-basecamp/issues/7)).
-
-**Host requirement.** A Basecamp app built from **logos-app `master`** (cpp-sdk ≥ #68). **No released
-build qualifies yet** (every release pins cpp-sdk ≤ 2026-04-22), so build one:
-`nix build github:logos-co/logos-app#bin-macos-app` and run that `.app`.
-
-**Runtime deps** (on PATH, or via `RADIO_*_BIN`): `nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy`
-— **not** `torsocks` (unused on mac).
-
+### 1. Install the macOS Basecamp host
+Download the latest signed desktop app (`LogosBasecamp-Desktop-*-aarch64.dmg`) and drag it to `/Applications`:
 ```bash
-PROF="$HOME/Library/Application Support/Logos/LogosBasecamp"
-for f in receiver_relay receiver_ui; do
-  lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" --allow-unsigned \
-       install --file "dist/${f}-0.1.0-darwin-arm64.lgx"
-done
-printf darwin-arm64 > "$PROF/modules/receiver_relay/variant"
-printf darwin-arm64 > "$PROF/plugins/receiver_ui/variant"
+open "https://github.com/logos-co/logos-app/releases/latest"
 ```
 
-Launch the #68+ app, open **Receiver** in the sidebar → stations appear (~10–15s) → **Play**
-(first `.onion` play takes ~10–30s while the listener Tor bootstraps). If the GUI app's PATH lacks
-`~/.nix-profile/bin`, pass absolute bins:
-`open -n LogosBasecamp.app --env RADIO_PRIVOXY_BIN=$(which privoxy) --env RADIO_FFPLAY_BIN=$(which ffplay) --env RADIO_TOR_BIN=$(which tor)`.
+### 2. Runtime dependencies — tor · ffmpeg · **privoxy**
+`.onion` playback needs **tor**, **ffmpeg** (`ffplay`) and **privoxy**. macOS has **no working `torsocks`**
+(SIP blocks its `DYLD_INSERT_LIBRARIES` shim), so the receiver routes Tor through a local **privoxy
+HTTP→SOCKS bridge** instead (`forward-socks5t` → the listener Tor; remote DNS, no IP/DNS leak). Install:
+```bash
+nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy     # or:  brew install tor ffmpeg privoxy
+```
+macOS GUI apps get a minimal `PATH` (no `~/.nix-profile/bin` / `/opt/homebrew/bin`), so point the receiver
+at the bins with `launchctl setenv` (persists across relaunch) — then relaunch Basecamp:
+```bash
+launchctl setenv RECEIVER_TOR_BIN     "$(which tor)"
+launchctl setenv RECEIVER_FFPLAY_BIN  "$(which ffplay)"
+launchctl setenv RECEIVER_PRIVOXY_BIN "$(which privoxy)"
+```
+
+### 3. Install delivery_module + the receiver
+`receiver_ui` depends on **`delivery_module`**, which the desktop `.dmg` does **not** bundle — install it
+from the in-app **Package Manager** (delivery_module **0.1.3**). Then install the receiver's darwin `.lgx`:
+```bash
+PROF="$HOME/Library/Application Support/Logos/LogosBasecamp"
+lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" --allow-unsigned \
+     install --file receiver_ui-0.2.0.2-darwin-arm64.lgx
+printf darwin-arm64 > "$PROF/plugins/receiver_ui/variant"
+```
+Build that darwin `.lgx` with `nix build .#lgx-portable` on an Apple-Silicon Mac (secp256k1 + tor helpers
+bundle automatically) — see [docs/MACOS-BUILD-PROTOCOL.md](docs/MACOS-BUILD-PROTOCOL.md).
+
+### 4. Run
+Launch Basecamp → open **Receiver** → stations appear (~10–15s) → **Play** (first `.onion` play takes
+~10–30s while the listener Tor bootstraps). Verified stations render `IP hidden by Tor · <fingerprint>`.
 
 ---
 
@@ -107,11 +114,11 @@ export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
 PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
 # 3. Install the SIGNED LGX from the v0.2.0 release (✓ Signed by xAlisher — no --allow-unsigned).
-curl -fL -o receiver_ui-0.2.0.1-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0/receiver_ui-0.2.0.1-linux-amd64.lgx
+curl -fL -o receiver_ui-0.2.0.2-linux-amd64.lgx \
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0/receiver_ui-0.2.0.2-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-        install --file receiver_ui-0.2.0.1-linux-amd64.lgx
+        install --file receiver_ui-0.2.0.2-linux-amd64.lgx
 printf 'linux-amd64' > "$PROF/plugins/receiver_ui/variant"   # select the variant
 #   (or build from source instead of downloading: nix build .#lgx-portable — see "Build from source")
 
