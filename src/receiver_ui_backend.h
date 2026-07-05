@@ -73,6 +73,8 @@ private:
     void    onNoAudioWatchdog();                 // ffplay running but silent → reap Tor + retry (#23)
     QString ensureTorListen();          // spawn a listener tor (SocksPort) for .onion playback
     void    killTorListen();
+    QString ensurePlaybackProxy();      // #7 macOS: privoxy HTTP→SOCKS bridge (torsocks is SIP-blocked on mac)
+    void    killPlaybackProxy();
     void    pollTorStatus();            // #37 parse tor.log bootstrap % → torStatus PROP
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
 
@@ -84,6 +86,9 @@ private:
     QString       m_torListenDir;
     QString       m_playingUrl;
     int           m_listenSocksPort = 0;
+    QProcess*     m_playProxy = nullptr;   // #7 macOS privoxy bridge (SOCKS→HTTP for ffplay)
+    QString       m_playProxyDir;
+    int           m_playProxyPort = 0;
     qint64        m_playStartMs = 0;    // when the current ffplay started (retry timing, #12)
     int           m_playAttempt = 0;    // consecutive auto-retries for the current station (#12)
     QTimer*       m_torPoll     = nullptr;  // #37 polls tor.log for the bootstrap % → torStatus
