@@ -42,6 +42,9 @@ Item {
         : backend.buffering    ? "caching"
         : "connecting"
     readonly property color cachingYellow: Theme.palette.warning
+    // #35 self-match-safe reap for an orphaned stream — the [n]/[c] brackets stop the pattern from matching
+    // the shell that runs it, while still matching the receiver's Tor (receiver_ui/torlisten) + ffplay (cookieCheck).
+    readonly property string reapCmd: "pkill -f 'receiver_ui/torliste[n]|cookieChe[c]k'"
 
     // #32 player-bar line 2 while connecting: reassurance messages (Tor/p2p/patience), SHUFFLED —
     // a shuffle-bag so each shows once per pass in random order, then re-shuffles (no repeats within a pass).
@@ -276,6 +279,55 @@ Item {
                     text: "Clear cache now"
                     implicitWidth: 140; implicitHeight: 32
                     onClicked: if (backend) backend.clearCache()
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
+
+                // #35 orphan-stream guidance (subtle) — ffplay+Tor keep running if you close the module
+                // mid-play (#2/#10). Warn to Stop first; give a copy-able reap command for when you forget.
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosText {
+                        text: "⚠ Stop the station before closing this module — otherwise the stream keeps playing in the background."
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                    LogosText {
+                        text: "Forgot? Reap the orphaned stream from a terminal:"
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                    Rectangle {                       // command box + copy icon
+                        Layout.fillWidth: true
+                        implicitHeight: cmdRow.implicitHeight + Theme.spacing.small
+                        radius: Theme.spacing.radiusSmall
+                        color: root.bgPrimary; border.color: root.borderColor; border.width: 1
+                        RowLayout {
+                            id: cmdRow
+                            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                                      leftMargin: Theme.spacing.small; rightMargin: Theme.spacing.small }
+                            spacing: Theme.spacing.small
+                            LogosText {
+                                text: root.reapCmd
+                                font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                                color: root.textSecondary
+                                Layout.fillWidth: true; elide: Text.ElideRight
+                            }
+                            Rectangle {               // copy icon — matches the Activity-log copy button
+                                id: reapCopyBtn
+                                implicitWidth: 20; implicitHeight: 20; color: "transparent"
+                                opacity: reapCopyArea.containsMouse ? 0.9 : 0.5
+                                Behavior on opacity { NumberAnimation { duration: 150 } }
+                                Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
+                                Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgPrimary; border.color: root.textMuted; border.width: 1; radius: 2 }
+                                Timer { id: reapCopyFb; interval: 200; onTriggered: reapCopyBtn.opacity = reapCopyArea.containsMouse ? 0.9 : 0.5 }
+                                MouseArea {
+                                    id: reapCopyArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    onClicked: { root.copyText(root.reapCmd); reapCopyBtn.opacity = 0.25; reapCopyFb.restart() }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
