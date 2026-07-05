@@ -453,7 +453,7 @@ Item {
                     color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
                     // #34 don't claim "none announced" until the network is actually up (badge not yellow/red)
                     text: (root.status === "Connected" || root.status === "PartiallyConnected")
-                            ? (root.discovering ? "Listening for stations…" : "Starting discovery…")
+                            ? (root.discovering ? "Looking for stations…" : "Starting discovery…")
                         : root.status === "Disconnected" ? "Disconnected — retrying…"
                         : "Connecting to the network…"
                 }
