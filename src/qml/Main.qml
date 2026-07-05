@@ -43,6 +43,33 @@ Item {
         : "connecting"
     readonly property color cachingYellow: Theme.palette.warning
 
+    // #32 player-bar line 2 while connecting: rotating reassurance (Tor/p2p/patience). Cycled by msgRotate.
+    property int connectMsgIndex: 0
+    readonly property var connectMsgs: [
+        "Tor connection can be slow — that's what protects the streamer's privacy…",
+        "Connecting, hang loose…",
+        "The only good system is a sound system…",
+        "Radio waves are owned by governments — that's why we went p2p…",
+        "No central server means decentralisation (and patience while we connect)…",
+        "Routing through onion layers — three hops for your anonymity…",
+        "No middlemen, no ads, no logs — just the signal…",
+        "Building a circuit through volunteers' relays worldwide…",
+        "Slow radio is free radio…",
+        "Nobody knows who's listening. Not even us. That's the point…",
+        "Can't be deplatformed if there's no platform…",
+        "Handshaking with the hidden service…",
+        "Patience is a small price for a station no one can shut down…",
+        "The revolution will not be centralised…"
+    ]
+    // #32 player-bar line 2 while playing: the station's host label + privacy (matches the list row)
+    function playingHostLine() {
+        var ss = root.stations()
+        for (var i = 0; i < ss.length; i++)
+            if (ss[i].name === root.nowPlaying)
+                return (ss[i].host || "anonymous") + " · " + (ss[i].privacy || "")
+        return "anonymous"
+    }
+
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
     readonly property bool   discovering:  backend ? backend.discovering  : false
@@ -308,7 +335,7 @@ Item {
         // ── Player bar (#9: Connecting… / Caching… breathing-yellow → orange ▶ Playing) ──
         Rectangle {
             id: playerBar
-            Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium; clip: true
+            Layout.fillWidth: true; height: 52; radius: Theme.spacing.radiusMedium; clip: true
             visible: root.nowPlaying.length > 0
             readonly property bool live: root.playPhase === "playing"   // audio actually out (ffplay clock)
             color: root.bgSecondary; border.width: 1
@@ -331,12 +358,21 @@ Item {
                         onRunningChanged: if (!running) phaseSym.opacity = 1
                     }
                 }
-                LogosText {
-                    text: root.playPhase === "playing"    ? root.nowPlaying
-                        : root.playPhase === "connecting" ? ("Connecting… · " + root.nowPlaying)
-                        :                                   ("Caching… · " + root.nowPlaying)
-                    font.pixelSize: Theme.typography.primaryText; Layout.fillWidth: true
-                    elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
+                Column {   // #32 two lines, like the station row
+                    Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; spacing: 0
+                    LogosText {                    // line 1 — always the station name
+                        text: root.nowPlaying
+                        font.pixelSize: Theme.typography.primaryText
+                        width: parent.width; elide: Text.ElideRight
+                    }
+                    LogosText {                    // line 2 — host·privacy when playing, rotating msg while connecting
+                        text: playerBar.live ? root.playingHostLine()
+                            : root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
+                        color: playerBar.live ? root.textSecondary : root.cachingYellow
+                        font.pixelSize: Theme.typography.secondaryText
+                        width: parent.width; elide: Text.ElideRight
+                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                    }
                 }
                 LogosButton {   // #19: perfect-round stop icon
                     text: "■"
@@ -345,6 +381,14 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: root.stopPlay()
                 }
+            }
+            // #32 rotate the connecting messages every ~4.5s; random start for variety; only while not live
+            Timer {
+                id: msgRotate
+                interval: 4500; repeat: true
+                running: playerBar.visible && !playerBar.live
+                onRunningChanged: if (running) root.connectMsgIndex = Math.floor(Math.random() * root.connectMsgs.length)
+                onTriggered: root.connectMsgIndex = (root.connectMsgIndex + 1) % root.connectMsgs.length
             }
         }
 
