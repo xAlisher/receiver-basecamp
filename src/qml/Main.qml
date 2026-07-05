@@ -441,7 +441,7 @@ Item {
                     color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
                     // #34 don't claim "none announced" until the network is actually up (badge not yellow/red)
                     text: (root.status === "Connected" || root.status === "PartiallyConnected")
-                            ? (root.discovering ? "Listening for stations…\nnone announced yet" : "Starting discovery…")
+                            ? (root.discovering ? "Listening for stations…" : "Starting discovery…")
                         : root.status === "Disconnected" ? "Disconnected — retrying…"
                         : "Connecting to the network…"
                 }
@@ -500,6 +500,28 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                         Behavior on opacity { NumberAnimation { duration: 250 } }
+                    }
+                }
+                // #38 small animated soundwave near the stop button — centred rounded bars, wave-shaped
+                // (tall in the middle), gently bouncing while playing. Decorative (no real FFT).
+                Row {
+                    id: wave
+                    visible: playerBar.live
+                    Layout.alignment: Qt.AlignVCenter
+                    height: 28; spacing: 2
+                    property real phase: 0
+                    // one animated phase drives all bars; ×2 (integer) → the loop wraps seamlessly.
+                    NumberAnimation on phase { running: wave.visible; from: 0; to: 6.2832; duration: 900; loops: Animation.Infinite }
+                    Repeater {
+                        model: 11
+                        delegate: Rectangle {
+                            width: 3; radius: width / 2
+                            anchors.verticalCenter: parent.verticalCenter    // grows both ways from the centre line
+                            color: root.accent
+                            readonly property real d: Math.abs(index - 5)     // distance from the centre bar → symmetric ripple
+                            // full-range amplitude, rippling outward from the centre (bars at equal d move together)
+                            height: 3 + (wave.height - 3) * (0.5 + 0.5 * Math.sin(wave.phase * 2 - d * 0.85))
+                        }
                     }
                 }
                 LogosButton {   // #19: perfect-round stop icon
