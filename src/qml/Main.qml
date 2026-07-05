@@ -142,7 +142,7 @@ Item {
         "Can't be deplatformed if there's no platform.",
         "Handshaking with the hidden service.",
         "Patience is a small price for a station no one can shut down.",
-        "The revolution will not be centralised.",
+        "The evolution will not be centralised.",
         // — this module's lineage —
         "This module is inspired by “Farewell to Westphalia”, by Jarrad Hope & Peter Ludlow.",
         "Farewell to Westphalia: exit the nation-state, enter the network.",
