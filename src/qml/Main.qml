@@ -104,6 +104,7 @@ Item {
             // live connection state: Connected→success, PartiallyConnected→warning, Disconnected→error, and
             // neutral textSecondary while starting. (LogosBadge renders AllUppercase; source stays lowercase.)
             LogosBadge {
+                id: statusBadge
                 Layout.alignment: Qt.AlignVCenter
                 text:  root.status === "Connected"         ? "discovering"
                      : root.status === "PartiallyConnected" ? "partial peers"
@@ -120,11 +121,16 @@ Item {
             // cogwheel — no gear icon asset ships with the module, so a tokenized custom toggle
             // (LogosIconButton needs an iconSource url). Active state borders in the accent colour.
             Rectangle {
-                width: 28; height: 28; radius: Theme.spacing.radiusSmall
+                // #31 match the status badge height (keeper cogwheel pattern) — not a hardcoded 28
+                implicitWidth: statusBadge.implicitHeight; implicitHeight: statusBadge.implicitHeight
+                Layout.alignment: Qt.AlignVCenter
+                radius: Theme.spacing.radiusSmall
                 color: gearArea.containsMouse ? root.bgSecondary : "transparent"
                 border.color: root.settingsOpen ? root.accent : root.borderColor; border.width: 1
                 LogosText {
-                    anchors.centerIn: parent; text: "⚙"
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    text: "⚙"
                     font.pixelSize: Theme.typography.primaryText
                     color: root.settingsOpen ? root.accent : root.textSecondary
                 }
