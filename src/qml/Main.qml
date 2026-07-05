@@ -186,6 +186,12 @@ Item {
             if (ss[i].name === root.nowPlaying) return ss[i].nowPlaying || ""
         return ""
     }
+    function playingDescription() {   // station description — shown in the bar when there's no now-playing
+        var ss = root.stations()
+        for (var i = 0; i < ss.length; i++)
+            if (ss[i].name === root.nowPlaying) return ss[i].description || ""
+        return ""
+    }
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
@@ -504,7 +510,7 @@ Item {
                 model: root.pinnedList
                 delegate: Rectangle {
                     Layout.fillWidth: true
-                    height: (modelData.online && (modelData.nowPlaying || "").length > 0) ? 76 : 56
+                    height: (modelData.online && ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0)) ? 76 : 56
                     radius: Theme.spacing.radiusMedium
                     color: pinRowArea.containsMouse && modelData.online ? root.bgActive : root.rowBase   // #2 surface (not page bg) so hover doesn't blend
                     opacity: modelData.online ? 1.0 : 0.55
@@ -521,9 +527,10 @@ Item {
                         LogosText { text: (modelData.name || "(unnamed)") + (modelData.online ? "" : " · offline")
                                color: modelData.online ? root.textPrimary : root.textMuted
                                font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { visible: modelData.online && (modelData.nowPlaying || "").length > 0
-                               text: "Playing now: " + (modelData.nowPlaying || "")
-                               color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { visible: modelData.online && ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0)
+                               text: (modelData.nowPlaying || "").length > 0 ? "Playing now: " + modelData.nowPlaying : (modelData.description || "")
+                               color: (modelData.nowPlaying || "").length > 0 ? root.accent : root.textSecondary
+                               font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
@@ -565,8 +572,8 @@ Item {
                                 anchors.centerIn: parent; width: 26; height: 26; radius: 13
                                 color: pinStopArea.containsMouse ? root.accent : "transparent"
                                 border.width: 1; border.color: pinStopArea.containsMouse ? root.accent : root.textPrimary
-                                StopIcon { anchors.centerIn: parent; width: 11; height: 11
-                                    iconColor: pinStopArea.containsMouse ? root.bgPrimary : root.textPrimary }
+                                Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2.5
+                                    color: pinStopArea.containsMouse ? root.bgPrimary : root.textPrimary }
                                 MouseArea { id: pinStopArea; anchors.fill: parent; hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                             }
@@ -627,7 +634,7 @@ Item {
                 model: root.stations()
                 delegate: Rectangle {
                     width: list.width; radius: Theme.spacing.radiusMedium
-                    height: (modelData.nowPlaying || "").length > 0 ? 76 : 56   // #40 taller for the now-playing line + line spacing
+                    height: ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0) ? 76 : 56   // taller for the info line
                     // recessed row inset (surfaceRecessed, subtle vs the panel); hover lifts to the page bg
                     color: rowArea.containsMouse ? root.bgPrimary : root.rowBase
                     // anchor-based row — deterministic positions, no RowLayout slack distribution
@@ -675,8 +682,8 @@ Item {
                             anchors.centerIn: parent; width: 26; height: 26; radius: 13
                             color: stopArea.containsMouse ? root.accent : "transparent"
                             border.width: 1; border.color: stopArea.containsMouse ? root.accent : root.textPrimary
-                            StopIcon { anchors.centerIn: parent; width: 11; height: 11
-                                iconColor: stopArea.containsMouse ? root.bgPrimary : root.textPrimary }
+                            Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2.5
+                                color: stopArea.containsMouse ? root.bgPrimary : root.textPrimary }
                             MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                         }
@@ -687,10 +694,11 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: Theme.spacing.tiny
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText {                     // #40 now-playing (swapped above the identity line)
-                               visible: (modelData.nowPlaying || "").length > 0
-                               text: "Playing now: " + (modelData.nowPlaying || "")
-                               color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText {                     // now-playing, or the station description when there's no metadata
+                               visible: (modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0
+                               text: (modelData.nowPlaying || "").length > 0 ? "Playing now: " + modelData.nowPlaying : (modelData.description || "")
+                               color: (modelData.nowPlaying || "").length > 0 ? root.accent : root.textSecondary
+                               font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
@@ -818,10 +826,11 @@ Item {
                         font.pixelSize: Theme.typography.primaryText
                         width: parent.width; elide: Text.ElideRight
                     }
-                    LogosText {                    // #40 now-playing — swapped above the identity line
-                        visible: playerBar.live && root.playingNowText().length > 0
-                        text: "Playing now: " + root.playingNowText()
-                        color: root.accent; font.pixelSize: Theme.typography.secondaryText
+                    LogosText {                    // now-playing, or the station description when there's no metadata
+                        visible: playerBar.live && (root.playingNowText().length > 0 || root.playingDescription().length > 0)
+                        text: root.playingNowText().length > 0 ? "Playing now: " + root.playingNowText() : root.playingDescription()
+                        color: root.playingNowText().length > 0 ? root.accent : root.textSecondary
+                        font.pixelSize: Theme.typography.secondaryText
                         width: parent.width; elide: Text.ElideRight
                     }
                     LogosText {                    // #5 identity line — always (patience lines moved to the loading block)

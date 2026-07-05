@@ -252,6 +252,8 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
     // #40 now-playing: attacker-controllable announce data — cap length + strip control chars before render
     s.nowPlaying = o.value(QStringLiteral("nowPlaying")).toString()
                      .remove(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]"))).left(120);
+    s.description = o.value(QStringLiteral("description")).toString()   // fallback when no now-playing
+                     .remove(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]"))).left(200);
     s.lastSeenMs = QDateTime::currentMSecsSinceEpoch();
 
     // #13 verify station identity. v:2 carries pubkey + sig over the canonical (sig-less) announce bytes;
@@ -314,6 +316,7 @@ void ReceiverUiBackend::publishStations()
         o["privacy"]   = s.privacy;
         o["topic"]     = s.topic;
         o["nowPlaying"] = s.nowPlaying;   // #40
+        o["description"] = s.description; // shown when now-playing is empty
         o["verified"]   = s.verified;     // #13 identity
         o["pubkey"]     = s.pubkey;
         o["fingerprint"] = s.fingerprint;
@@ -366,6 +369,7 @@ void ReceiverUiBackend::publishPinned()
         if (live) {
             o["name"] = live->name; o["streamUrl"] = live->streamUrl; o["privacy"] = live->privacy;
             o["topic"] = live->topic; o["nowPlaying"] = live->nowPlaying; o["fingerprint"] = live->fingerprint;
+            o["description"] = live->description;
         }
         arr.append(o);
     }

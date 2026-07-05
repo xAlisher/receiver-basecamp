@@ -46,6 +46,7 @@ private:
         QString privacy;
         QString topic;
         QString nowPlaying;   // #40 current show/track from the announce (may be empty)
+        QString description;  // station description — shown when there's no now-playing metadata
         QString pubkey;       // #13 verified station identity ("" = unverified / anonymous v:1)
         QString fingerprint;  // #13 3-word PGP fingerprint of pubkey (for display + pin)
         QString keySource;    // #4 "keycard" | "autogen" (from the signed announce) — drives the display
