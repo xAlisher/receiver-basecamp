@@ -14,6 +14,9 @@
 #include <QProcessEnvironment>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QTcpSocket>       // #26 pre-warm the onion rendezvous circuit
+#include <QNetworkProxy>
+#include <QPointer>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -305,6 +308,32 @@ QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
     return QString();
 }
 
+QString ReceiverUiBackend::prewarm(QString streamUrl)
+{
+    // #26 On station select/hover, build the Tor rendezvous circuit + cache the HS descriptor ahead of time
+    // so the eventual play connects in ~one circuit instead of 2-3 reaps. Fire-and-forget, best-effort.
+    if (!isOnionUrl(streamUrl)) return QString();       // only .onion pays the rendezvous cost
+    if (!m_playingUrl.isEmpty()) return QString();      // already playing — don't disturb the live circuit
+    const QString host = QUrl(streamUrl).host();
+    if (host.isEmpty() || host == m_prewarmedHost) return QString();   // debounce: warm each onion once
+    if (!ensureTorListen().isEmpty() || m_listenSocksPort <= 0) return QString();
+    m_prewarmedHost = host;
+    QTcpSocket* s = new QTcpSocket(this);
+    s->setProxy(QNetworkProxy(QNetworkProxy::Socks5Proxy, QStringLiteral("127.0.0.1"), quint16(m_listenSocksPort)));
+    connect(s, &QTcpSocket::connected, this, [this, s, host] {
+        diag(QStringLiteral("pre-warmed Tor circuit to %1").arg(host));   // rendezvous built + descriptor cached
+        s->abort(); s->deleteLater();
+    });
+    connect(s, &QAbstractSocket::errorOccurred, this, [this, s] {
+        m_prewarmedHost.clear();   // warming failed → let a later hover try again
+        s->deleteLater();
+    });
+    QPointer<QTcpSocket> sp = s;
+    QTimer::singleShot(50000, this, [sp] { if (sp) sp->abort(); });   // cap the warm attempt (→ errorOccurred → cleanup)
+    s->connectToHost(host, 80);
+    return QString();
+}
+
 QString ReceiverUiBackend::startFfplay()
 {
     killPlayer();
@@ -503,6 +532,7 @@ void ReceiverUiBackend::killTorListen()
     m_torListen = nullptr;
     if (!m_torListenDir.isEmpty()) { QDir(m_torListenDir).removeRecursively(); m_torListenDir.clear(); }
     m_listenSocksPort = 0;
+    m_prewarmedHost.clear();   // #26 the warmed circuit died with this Tor → allow re-warming
 }
 
 bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
@@ -534,7 +564,7 @@ bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socks
         m_torListen->deleteLater(); m_torListen = nullptr;
         return fail(QStringLiteral("tor_port_in_use"));
     }
-    log(QStringLiteral("listener tor up (SOCKS %1)").arg(m_listenSocksPort));
+    log(QStringLiteral("listener tor up (SOCKS %1)").arg(socksPort));   // #27 the real port — m_listenSocksPort isn't assigned until ensureTorListen returns
     return true;
 }
 

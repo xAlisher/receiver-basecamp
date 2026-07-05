@@ -26,6 +26,7 @@ public:
     QString stopDiscovery() override;
     QString addTopic(QString topic) override;
     QString play(QString streamUrl, QString stationName) override;
+    QString prewarm(QString streamUrl) override;   // #26 pre-build the Tor circuit to an onion on select
     QString stopPlayback() override;
     QString setBuffer(int sec) override;
     QString setCacheHidden(bool on) override;
@@ -76,6 +77,7 @@ private:
     QTimer*       m_watchdog    = nullptr;  // #23 no-audio watchdog (single-shot per play attempt)
     bool          m_audioFlowing = false;   // #23 ffplay emitted decode stats → real audio is flowing
     int           m_reapCount   = 0;        // #23 how many times we've reaped the listener Tor this play
+    QString       m_prewarmedHost;          // #26 onion host whose rendezvous circuit we've already warmed
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;

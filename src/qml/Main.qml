@@ -281,6 +281,8 @@ Item {
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // #26 hovering a station = intent to play → pre-build its Tor circuit so Play is fast
+                        onEntered: if (backend) backend.prewarm(modelData.streamUrl)
                         onClicked: root.startPlay(modelData.streamUrl, modelData.name)
                     }
                 }

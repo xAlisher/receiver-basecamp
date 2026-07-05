@@ -23,6 +23,7 @@ class ReceiverUi
     SLOT(QString stopDiscovery())
     SLOT(QString addTopic(QString topic))                     // subscribe to a private/extra topic
     SLOT(QString play(QString streamUrl, QString stationName))
+    SLOT(QString prewarm(QString streamUrl))                  // #26 build the Tor rendezvous circuit on select → fast play
     SLOT(QString stopPlayback())
     SLOT(QString setBuffer(int sec))         // mutator; reads back via the listenBuffer PROP
     SLOT(QString setCacheHidden(bool on))    // mutator; reads back via the hideCache PROP
