@@ -64,12 +64,12 @@ Item {
         root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
     }
 
+    // The countdown is now only a soft progress HINT. The flip to "Playing" is driven by the backend's
+    // playbackLive PROP (ffplay's real master clock = audio actually out), NOT this timer — so "Playing"
+    // never shows over silence. If the buffer estimate elapses first, we floor at 0 and stay "Caching…".
     Timer {
         id: cacheTimer; interval: 1000; repeat: true
-        onTriggered: {
-            if (root.cacheLeft > 0) root.cacheLeft--
-            if (root.cacheLeft <= 0) { root.playPhase = "playing"; cacheTimer.stop() }
-        }
+        onTriggered: { if (root.cacheLeft > 0) root.cacheLeft--; else cacheTimer.stop() }
     }
 
     Connections {
@@ -79,6 +79,16 @@ Item {
         function onNowPlayingChanged() {
             if (backend && backend.nowPlaying.length === 0 && root.playPhase !== "idle") {
                 root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
+            }
+        }
+        // #9 true-state: ffplay's real audio clock drives the phase, not the countdown.
+        function onPlaybackLiveChanged() {
+            if (!backend) return
+            if (backend.playbackLive) {
+                root.playPhase = "playing"; cacheTimer.stop()          // audio is actually OUT
+            } else if (backend.nowPlaying.length > 0) {
+                root.playPhase = "caching"                             // dropped / reconnecting → honest "Caching…"
+                root.cacheLeft = Math.max(1, root.listenBuffer); cacheTimer.restart()
             }
         }
         function onActivity(line) {

@@ -363,21 +363,33 @@ QString ReceiverUiBackend::startFfplay()
     // exiting (-infbuf), so the finished-handler never fires. Watch ffplay's -stats output for a decode
     // status line ("aq="); if none arrives within kNoAudioMs, the stream is stuck → reap Tor + retry.
     m_audioFlowing = false;
+    setPlaybackLive(false);
     connect(m_player, &QProcess::readyReadStandardError, this, [this] {
-        if (m_audioFlowing) return;
-        const QByteArray e = m_player->readAllStandardError();
-        // ffplay -stats prints "… aq=  <N>KB …" on \r-updated lines. Require a NON-ZERO audio queue —
-        // ffplay actually pulled stream data. The initial "aq= 0KB" line prints even when the onion/HLS
-        // is stuck with NO data, so matching a bare "aq=" false-cancels the watchdog (observed: ffplay at
-        // 0.2% CPU, no sink-input, yet "audio flowing" logged → no retry → silence). #23
-        static const QRegularExpression aqRe(QStringLiteral("aq=\\s*([0-9]+)KB"));
-        auto it = aqRe.globalMatch(QString::fromLatin1(e));
-        while (it.hasNext()) {
-            if (it.next().captured(1).toInt() > 0) {
-                m_audioFlowing = true;
-                if (m_watchdog) m_watchdog->stop();
-                diag(QStringLiteral("audio flowing (ffplay aq>0)"));
-                break;
+        if (m_audioFlowing && playbackLive()) return;   // both signals seen — nothing left to watch
+        const QString e = QString::fromLatin1(m_player->readAllStandardError());
+        // (1) WATCHDOG signal — a NON-ZERO audio queue means ffplay pulled real stream bytes, so the
+        // connect works (not stuck). The bare initial "aq= 0KB" line prints even with no data, so require
+        // aq>0 or the watchdog false-cancels (observed: 0.2% CPU, no sink-input, yet "audio flowing"). #23
+        if (!m_audioFlowing) {
+            static const QRegularExpression aqRe(QStringLiteral("aq=\\s*([0-9]+)KB"));
+            auto it = aqRe.globalMatch(e);
+            while (it.hasNext()) {
+                if (it.next().captured(1).toInt() > 0) {
+                    m_audioFlowing = true;
+                    if (m_watchdog) m_watchdog->stop();
+                    diag(QStringLiteral("audio buffering (aq>0) — connect works"));
+                    break;
+                }
+            }
+        }
+        // (2) TRUE-PLAYING signal — ffplay's -stats leading field is the master clock: "nan" while
+        // connecting/buffering, a real number the instant audio is actually OUTPUT (measured: nan→4395.23
+        // exactly at first sample). Drives the UI so "Playing" == sound, not a countdown. #9
+        if (!playbackLive()) {
+            static const QRegularExpression liveRe(QStringLiteral("(?:^|[\\r\\n])\\s*[0-9]+\\.[0-9]+\\s+(?:M-A|A-V)"));
+            if (liveRe.match(e).hasMatch()) {
+                setPlaybackLive(true);
+                diag(QStringLiteral("playback LIVE (ffplay master clock ticking) — audio is out"));
             }
         }
     });
@@ -420,6 +432,7 @@ void ReceiverUiBackend::onNoAudioWatchdog()
 void ReceiverUiBackend::killPlayer()
 {
     if (m_watchdog) m_watchdog->stop();             // #23 cancel the no-audio watchdog for this player
+    setPlaybackLive(false);                         // #9 no player → audio is not out (UI leaves "Playing")
     if (!m_player) return;
     disconnect(m_player, nullptr, this, nullptr);   // intentional kill — don't fire the retry handler (#12)
     m_player->terminate();
