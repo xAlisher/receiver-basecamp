@@ -366,15 +366,26 @@ Item {
 
         // ── Add a private topic (#44: replaces the view; keeps the topic; ✕ returns to public) ──
         Item {
+            id: topicRow
             Layout.fillWidth: true
             implicitHeight: topicField.implicitHeight
+            readonly property string tt: topicField.text.trim()
+            readonly property bool active: tt.length > 0 && tt === root.selectedTopic   // submitted = current view
+            function submit() { if (backend && topicRow.tt.length) { backend.addTopic(topicRow.tt); root.selectedTopic = topicRow.tt } }
             LogosTextField {
                 id: topicField
                 width: parent.width
                 placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
             }
-            LogosText {                              // ✕ clear → back to the public directory
-                visible: topicField.text.trim().length > 0
+            LogosButton {                            // "Switch" — populated but not yet the active topic
+                visible: topicRow.tt.length > 0 && !topicRow.active
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.tiny }
+                text: "Switch"
+                implicitHeight: Math.max(24, topicField.implicitHeight - 8)
+                onClicked: topicRow.submit()
+            }
+            LogosText {                              // ✕ — active topic → clear back to the public directory
+                visible: topicRow.active
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.small }
                 text: "✕"; font.pixelSize: Theme.typography.secondaryText
                 color: clearArea.containsMouse ? root.accent : root.textMuted
