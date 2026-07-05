@@ -14,9 +14,6 @@
 #include <QProcessEnvironment>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QTcpSocket>       // #26 pre-warm the onion rendezvous circuit
-#include <QNetworkProxy>
-#include <QPointer>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -35,9 +32,6 @@ constexpr int    kPatientMs      = 55000; // #23 per-reap patient window — a f
                                           // anywhere from ~10s to >55s, so give each reaped Tor a full window.
 constexpr int    kMaxReaps       = 3;     // #23 reap up to this many times before giving up — a LIVE station
                                           // connects within a retry or two; one window is too eager (false "unreachable").
-constexpr int    kMaxPrewarm     = 4;     // #28 cap auto-warmed onion circuits — station announces are untrusted
-constexpr int    kMaxWarmTries   = 6;     // #29 warm-socket retries — early tries fail while the Tor bootstraps
-constexpr int    kWarmRetryMs    = 5000;  // #29 backoff between warm-socket attempts
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -316,47 +310,15 @@ QString ReceiverUiBackend::play(QString streamUrl, QString stationName)
 
 QString ReceiverUiBackend::prewarm(QString streamUrl)
 {
-    // #26 On station select/hover, build the Tor rendezvous circuit + cache the HS descriptor ahead of time
-    // so the eventual play connects in ~one circuit instead of 2-3 reaps. Fire-and-forget, best-effort.
-    if (!isOnionUrl(streamUrl)) return QString();       // only .onion pays the rendezvous cost
-    if (!m_playingUrl.isEmpty()) return QString();      // already playing — don't disturb the live circuit
-    const QString host = QUrl(streamUrl).host();
-    if (host.isEmpty() || m_prewarmedHosts.contains(host)) return QString();   // already warmed this onion
-    if (m_prewarmedHosts.size() >= kMaxPrewarm) return QString();   // #28 cap — station announces are untrusted
-    if (!ensureTorListen().isEmpty() || m_listenSocksPort <= 0) return QString();
-    m_prewarmedHosts.insert(host);
-    diag(QStringLiteral("pre-warming %1").arg(host));
-    prewarmConnect(host, 1);
+    // #30 (was #26/#28/#29 — the warm SOCKET couldn't beat Tor's rendezvous variability, because the warm
+    // connection IS the rendezvous). Keep only the reliable win: spawn the listener Tor early on select/
+    // discovery so its ~11s bootstrap is done before Play. Fast recovery is owned by the multi-reap watchdog.
+    if (!isOnionUrl(streamUrl)) return QString();       // only .onion needs a listener Tor
+    if (!m_playingUrl.isEmpty()) return QString();      // already playing
+    if (m_torListen && m_torListen->state() == QProcess::Running) return QString();   // Tor already up
+    log(QStringLiteral("readying Tor for playback…"));
+    ensureTorListen();   // spawn + bootstrap now so Play doesn't wait for it
     return QString();
-}
-
-void ReceiverUiBackend::prewarmConnect(const QString& host, int attempt)
-{
-    // #29 The listener Tor is still bootstrapping on the first tries, so the warm socket errors — retry
-    // with backoff until it lands after bootstrap (the SOCKS connection then holds through the rendezvous),
-    // logging each step so we can confirm the circuit was actually pre-built (vs. just getting lucky).
-    if (!m_prewarmedHosts.contains(host) || m_listenSocksPort <= 0) return;   // reaped / cleared
-    if (isOnionUrl(m_playingUrl) && QUrl(m_playingUrl).host() == host) return;   // now playing it — the play IS the warm
-    QTcpSocket* s = new QTcpSocket(this);
-    s->setProxy(QNetworkProxy(QNetworkProxy::Socks5Proxy, QStringLiteral("127.0.0.1"), quint16(m_listenSocksPort)));
-    connect(s, &QTcpSocket::connected, this, [this, s, host, attempt] {
-        diag(QStringLiteral("pre-warmed %1 (attempt %2) — rendezvous circuit built").arg(host).arg(attempt));
-        s->abort(); s->deleteLater();   // circuit + descriptor now cached; the eventual play reuses them
-    });
-    connect(s, &QAbstractSocket::errorOccurred, this, [this, s, host, attempt] {
-        s->deleteLater();
-        if (attempt < kMaxWarmTries && m_prewarmedHosts.contains(host)) {
-            diag(QStringLiteral("pre-warm %1 failed (attempt %2/%3) — retrying (Tor likely still bootstrapping)")
-                     .arg(host).arg(attempt).arg(kMaxWarmTries));
-            QTimer::singleShot(kWarmRetryMs, this, [this, host, attempt] { prewarmConnect(host, attempt + 1); });
-        } else {
-            diag(QStringLiteral("pre-warm %1 gave up after %2 attempts").arg(host).arg(attempt));
-            m_prewarmedHosts.remove(host);   // allow a later hover/discovery to try again
-        }
-    });
-    QPointer<QTcpSocket> sp = s;
-    QTimer::singleShot(50000, this, [sp] { if (sp) sp->abort(); });   // cap a single attempt (→ errorOccurred)
-    s->connectToHost(host, 80);
 }
 
 QString ReceiverUiBackend::startFfplay()
@@ -557,7 +519,6 @@ void ReceiverUiBackend::killTorListen()
     m_torListen = nullptr;
     if (!m_torListenDir.isEmpty()) { QDir(m_torListenDir).removeRecursively(); m_torListenDir.clear(); }
     m_listenSocksPort = 0;
-    m_prewarmedHosts.clear();   // #26 the warmed circuits died with this Tor → allow re-warming
 }
 
 bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
