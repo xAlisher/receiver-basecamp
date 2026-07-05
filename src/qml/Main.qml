@@ -387,8 +387,14 @@ Item {
                 id: msgRotate
                 interval: 4500; repeat: true
                 running: playerBar.visible && !playerBar.live
-                onRunningChanged: if (running) root.connectMsgIndex = Math.floor(Math.random() * root.connectMsgs.length)
-                onTriggered: root.connectMsgIndex = (root.connectMsgIndex + 1) % root.connectMsgs.length
+                function pick() {                       // random, but never the same message twice in a row
+                    var n = root.connectMsgIndex
+                    while (n === root.connectMsgIndex && root.connectMsgs.length > 1)
+                        n = Math.floor(Math.random() * root.connectMsgs.length)
+                    root.connectMsgIndex = n
+                }
+                onRunningChanged: if (running) pick()
+                onTriggered: pick()
             }
         }
 
