@@ -5,6 +5,7 @@ class ReceiverUi
 {
     PROP(QString connectionStatus="initializing" READONLY)   // delivery connectionStateChanged
     PROP(bool    nodeReady=false READONLY)                    // createNode + start succeeded
+    PROP(QString torStatus="off" READONLY)                    // #37 listener Tor: off|booting|ready|failed (from tor.log bootstrap %)
     PROP(bool    discovering=false READONLY)                  // subscribed to the directory topic
     PROP(QString lastError="" READONLY)
 

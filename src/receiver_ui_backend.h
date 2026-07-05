@@ -62,6 +62,7 @@ private:
     void    onNoAudioWatchdog();                 // ffplay running but silent → reap Tor + retry (#23)
     QString ensureTorListen();          // spawn a listener tor (SocksPort) for .onion playback
     void    killTorListen();
+    void    pollTorStatus();            // #37 parse tor.log bootstrap % → torStatus PROP
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
 
     bool            m_eventsWired = false;
@@ -74,6 +75,7 @@ private:
     int           m_listenSocksPort = 0;
     qint64        m_playStartMs = 0;    // when the current ffplay started (retry timing, #12)
     int           m_playAttempt = 0;    // consecutive auto-retries for the current station (#12)
+    QTimer*       m_torPoll     = nullptr;  // #37 polls tor.log for the bootstrap % → torStatus
     QTimer*       m_watchdog    = nullptr;  // #23 no-audio watchdog (single-shot per play attempt)
     bool          m_audioFlowing = false;   // #23 ffplay emitted decode stats → real audio is flowing
     int           m_reapCount   = 0;        // #23 how many times we've reaped the listener Tor this play

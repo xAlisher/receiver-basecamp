@@ -505,7 +505,13 @@ QString ReceiverUiBackend::ensureTorListen()
         s << "SocksPort " << p << "\n"
           << "DataDirectory " << dir << "/data\n"
           << "Log notice file " << dir << "/tor.log\n";
-        if (startTorProc(dir, cfg, p, err)) { m_torListenDir = dir; m_listenSocksPort = p; return QString(); }
+        if (startTorProc(dir, cfg, p, err)) {
+            m_torListenDir = dir; m_listenSocksPort = p;
+            setTorStatus(QStringLiteral("booting"));   // #37
+            if (!m_torPoll) { m_torPoll = new QTimer(this); connect(m_torPoll, &QTimer::timeout, this, &ReceiverUiBackend::pollTorStatus); }
+            m_torPoll->start(1000);
+            return QString();
+        }
     }
     return err.isEmpty() ? QStringLiteral("tor_listen_failed") : err;
 }
@@ -519,6 +525,24 @@ void ReceiverUiBackend::killTorListen()
     m_torListen = nullptr;
     if (!m_torListenDir.isEmpty()) { QDir(m_torListenDir).removeRecursively(); m_torListenDir.clear(); }
     m_listenSocksPort = 0;
+    if (m_torPoll) m_torPoll->stop();       // #37
+    setTorStatus(QStringLiteral("off"));
+}
+
+void ReceiverUiBackend::pollTorStatus()
+{
+    // #37 surface the listener Tor's health from the bootstrap log it already writes.
+    if (!m_torListen) { setTorStatus(QStringLiteral("off")); if (m_torPoll) m_torPoll->stop(); return; }
+    if (m_torListen->state() != QProcess::Running) { setTorStatus(QStringLiteral("failed")); if (m_torPoll) m_torPoll->stop(); return; }
+    QFile f(m_torListenDir + "/tor.log");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return;   // not written yet — stay "booting"
+    const QString log = QString::fromLatin1(f.readAll()); f.close();
+    static const QRegularExpression re(QStringLiteral("Bootstrapped ([0-9]+)%"));
+    int pct = -1;
+    auto it = re.globalMatch(log);
+    while (it.hasNext()) pct = it.next().captured(1).toInt();     // last bootstrap line wins
+    if (pct >= 100) { setTorStatus(QStringLiteral("ready")); if (m_torPoll) m_torPoll->stop(); }
+    else setTorStatus(QStringLiteral("booting"));
 }
 
 bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
