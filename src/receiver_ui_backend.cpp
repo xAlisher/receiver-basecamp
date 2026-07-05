@@ -25,6 +25,7 @@ constexpr int    kPruneMs     = 5000;
 constexpr int    kMaxPlayRetry = 2;      // auto-retries after ffplay self-exits before giving up (#12)
 constexpr qint64 kStablePlayMs = 45000;  // played this long before exiting ⇒ was healthy → reset retry budget
 constexpr int    kRetryBackoffMs = 1500; // brief backoff before a retry (let the reaped Tor's port free)
+constexpr int    kNoAudioMs      = 12000; // #23 no audio within this window ⇒ stuck (Tor cold-start) → retry
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -311,6 +312,7 @@ QString ReceiverUiBackend::startFfplay()
     const QString ffplay = resolveBin(QStringLiteral("ffplay"), "RECEIVER_FFPLAY_BIN");
     QStringList ffargs;
     ffargs << "-nodisp" << "-autoexit" << "-loglevel" << "error" << "-infbuf"
+           << "-stats"   // #23 periodic decode status line on stderr → the no-audio watchdog reads it
            // MediaMTX gates onion HLS with a Secure cookieCheck cookie ffmpeg won't return over the
            // http onion → 302 loop → no audio. Pre-supply it (radio onion fix).
            << "-cookies" << "cookieCheck=1; path=/";
@@ -351,11 +353,42 @@ QString ReceiverUiBackend::startFfplay()
     connect(m_player, &QProcess::finished, this, [this] {
         retryOrStopPlayback(QDateTime::currentMSecsSinceEpoch() - m_playStartMs);
     });
+
+    // #23 no-audio watchdog: ffplay can connect but buffer SILENT (Tor rendezvous cold-start) without
+    // exiting (-infbuf), so the finished-handler never fires. Watch ffplay's -stats output for a decode
+    // status line ("aq="); if none arrives within kNoAudioMs, the stream is stuck → reap Tor + retry.
+    m_audioFlowing = false;
+    connect(m_player, &QProcess::readyReadStandardError, this, [this] {
+        if (m_audioFlowing) return;
+        const QByteArray e = m_player->readAllStandardError();
+        if (e.contains("aq=") || e.contains("A-V:") || e.contains("M-A:")) {
+            m_audioFlowing = true;
+            if (m_watchdog) m_watchdog->stop();
+            diag(QStringLiteral("audio flowing (ffplay decode stats seen)"));
+        }
+    });
+    if (!m_watchdog) {
+        m_watchdog = new QTimer(this);
+        m_watchdog->setSingleShot(true);
+        QObject::connect(m_watchdog, &QTimer::timeout, this, &ReceiverUiBackend::onNoAudioWatchdog);
+    }
+    m_watchdog->start(kNoAudioMs);
     return QString();
+}
+
+void ReceiverUiBackend::onNoAudioWatchdog()
+{
+    if (m_playingUrl.isEmpty() || m_audioFlowing) return;   // stopped, or audio came through
+    // ffplay is up but no decode stats after kNoAudioMs → stuck on a cold/failed Tor circuit.
+    diag(QStringLiteral("no-audio watchdog fired — ffplay silent, reap Tor + retry"));
+    log(QStringLiteral("no sound yet — reconnecting"));
+    killPlayer();               // kill the hung ffplay (disconnects the finished handler)
+    retryOrStopPlayback(0);     // reap the listener Tor + retry (fail-fast), or give up after kMaxPlayRetry
 }
 
 void ReceiverUiBackend::killPlayer()
 {
+    if (m_watchdog) m_watchdog->stop();             // #23 cancel the no-audio watchdog for this player
     if (!m_player) return;
     disconnect(m_player, nullptr, this, nullptr);   // intentional kill — don't fire the retry handler (#12)
     m_player->terminate();
