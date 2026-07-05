@@ -43,6 +43,7 @@ private:
         QString streamUrl;
         QString privacy;
         QString topic;
+        QString nowPlaying;   // #40 current show/track from the announce (may be empty)
         qint64  lastSeenMs = 0;
     };
 

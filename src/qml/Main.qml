@@ -114,6 +114,13 @@ Item {
             if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy)
         return "Anonymous over Tor"
     }
+    // #40 current show of the station we're playing (for the player bar)
+    function playingNowText() {
+        var ss = root.stations()
+        for (var i = 0; i < ss.length; i++)
+            if (ss[i].name === root.nowPlaying) return ss[i].nowPlaying || ""
+        return ""
+    }
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
@@ -375,7 +382,8 @@ Item {
                 anchors.fill: parent; anchors.margins: Theme.spacing.tiny; clip: true; spacing: Theme.spacing.tiny
                 model: root.stations()
                 delegate: Rectangle {
-                    width: list.width; height: 52; radius: Theme.spacing.radiusMedium
+                    width: list.width; radius: Theme.spacing.radiusMedium
+                    height: (modelData.nowPlaying || "").length > 0 ? 66 : 52   // #40 taller for the now-playing line
                     // recessed row inset (surfaceRecessed, subtle vs the panel); hover lifts to the page bg
                     color: rowArea.containsMouse ? root.bgPrimary : root.rowBase
                     // anchor-based row — deterministic positions, no RowLayout slack distribution
@@ -423,6 +431,10 @@ Item {
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { text: root.hostLine(modelData.host, modelData.privacy)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText {                     // #40 now-playing (from the announce; hidden when empty)
+                               visible: (modelData.nowPlaying || "").length > 0
+                               text: "Playing now: " + (modelData.nowPlaying || "")
+                               color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
@@ -500,6 +512,12 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                         Behavior on opacity { NumberAnimation { duration: 250 } }
+                    }
+                    LogosText {                    // #40 line 3 — now-playing show (while playing, if announced)
+                        visible: playerBar.live && root.playingNowText().length > 0
+                        text: "Playing now: " + root.playingNowText()
+                        color: root.accent; font.pixelSize: Theme.typography.secondaryText
+                        width: parent.width; elide: Text.ElideRight
                     }
                 }
                 // #38 small animated soundwave near the stop button — centred rounded bars, wave-shaped

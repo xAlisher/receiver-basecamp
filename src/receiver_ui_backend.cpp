@@ -244,6 +244,9 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
     s.streamUrl = o.value(QStringLiteral("streamUrl")).toString();
     s.privacy   = o.value(QStringLiteral("privacy")).toString();
     s.topic     = o.value(QStringLiteral("announceTopic")).toString();
+    // #40 now-playing: attacker-controllable announce data — cap length + strip control chars before render
+    s.nowPlaying = o.value(QStringLiteral("nowPlaying")).toString()
+                     .remove(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]"))).left(120);
     s.lastSeenMs = QDateTime::currentMSecsSinceEpoch();
 
     const QString key = s.topic + "|" + s.name;
@@ -278,6 +281,7 @@ void ReceiverUiBackend::publishStations()
         o["streamUrl"] = s.streamUrl;
         o["privacy"]   = s.privacy;
         o["topic"]     = s.topic;
+        o["nowPlaying"] = s.nowPlaying;   // #40
         o["uptimeS"]   = (double)((now - s.lastSeenMs) / 1000);
         arr.append(o);
     }
