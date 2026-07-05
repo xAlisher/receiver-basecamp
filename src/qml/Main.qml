@@ -97,15 +97,18 @@ Item {
         "“Trusted third parties are security holes.” — Nick Szabo"
     ]
     // #32 player-bar line 2 while playing: the station's host label + privacy (matches the list row)
+    // #32 secondary line for a station (shared by the list row AND the player bar):
+    //   onion → "Anonymous over Tor" (or "<host> over Tor"); otherwise "<host> · <privacy>".
+    function hostLine(host, privacy) {
+        var h = (host && host.length) ? host : "anonymous"
+        if ((privacy || "").toLowerCase() === "onion")
+            return (h.toLowerCase() === "anonymous" ? "Anonymous" : h) + " over Tor"
+        return h + (privacy ? " · " + privacy : "")
+    }
     function playingHostLine() {
         var ss = root.stations()
         for (var i = 0; i < ss.length; i++)
-            if (ss[i].name === root.nowPlaying) {
-                var host = ss[i].host || "anonymous"
-                if ((ss[i].privacy || "") === "onion")
-                    return (host === "anonymous" ? "Anonymous" : host) + " over Tor"
-                return host + ((ss[i].privacy) ? " · " + ss[i].privacy : "")
-            }
+            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy)
         return "Anonymous over Tor"
     }
 
@@ -347,7 +350,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
