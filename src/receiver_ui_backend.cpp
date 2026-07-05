@@ -35,6 +35,7 @@ constexpr int    kPatientMs      = 55000; // #23 per-reap patient window — a f
                                           // anywhere from ~10s to >55s, so give each reaped Tor a full window.
 constexpr int    kMaxReaps       = 3;     // #23 reap up to this many times before giving up — a LIVE station
                                           // connects within a retry or two; one window is too eager (false "unreachable").
+constexpr int    kMaxPrewarm     = 4;     // #28 cap auto-warmed onion circuits — station announces are untrusted
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -252,7 +253,10 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
     const QString key = s.topic + "|" + s.name;
     const bool isNew = !m_stations.contains(key);
     m_stations.insert(key, s);
-    if (isNew) log("discovered \"" + s.name + "\"");
+    if (isNew) {
+        log("discovered \"" + s.name + "\"");
+        prewarm(s.streamUrl);   // #28 warm this onion's rendezvous circuit on discovery → fast first play (no hover)
+    }
     publishStations();
 }
 
@@ -315,17 +319,18 @@ QString ReceiverUiBackend::prewarm(QString streamUrl)
     if (!isOnionUrl(streamUrl)) return QString();       // only .onion pays the rendezvous cost
     if (!m_playingUrl.isEmpty()) return QString();      // already playing — don't disturb the live circuit
     const QString host = QUrl(streamUrl).host();
-    if (host.isEmpty() || host == m_prewarmedHost) return QString();   // debounce: warm each onion once
+    if (host.isEmpty() || m_prewarmedHosts.contains(host)) return QString();   // already warmed this onion
+    if (m_prewarmedHosts.size() >= kMaxPrewarm) return QString();   // #28 cap — station announces are untrusted
     if (!ensureTorListen().isEmpty() || m_listenSocksPort <= 0) return QString();
-    m_prewarmedHost = host;
+    m_prewarmedHosts.insert(host);
     QTcpSocket* s = new QTcpSocket(this);
     s->setProxy(QNetworkProxy(QNetworkProxy::Socks5Proxy, QStringLiteral("127.0.0.1"), quint16(m_listenSocksPort)));
     connect(s, &QTcpSocket::connected, this, [this, s, host] {
         diag(QStringLiteral("pre-warmed Tor circuit to %1").arg(host));   // rendezvous built + descriptor cached
         s->abort(); s->deleteLater();
     });
-    connect(s, &QAbstractSocket::errorOccurred, this, [this, s] {
-        m_prewarmedHost.clear();   // warming failed → let a later hover try again
+    connect(s, &QAbstractSocket::errorOccurred, this, [this, s, host] {
+        m_prewarmedHosts.remove(host);   // warming failed → let a later hover/discovery try again
         s->deleteLater();
     });
     QPointer<QTcpSocket> sp = s;
@@ -532,7 +537,7 @@ void ReceiverUiBackend::killTorListen()
     m_torListen = nullptr;
     if (!m_torListenDir.isEmpty()) { QDir(m_torListenDir).removeRecursively(); m_torListenDir.clear(); }
     m_listenSocksPort = 0;
-    m_prewarmedHost.clear();   // #26 the warmed circuit died with this Tor → allow re-warming
+    m_prewarmedHosts.clear();   // #26 the warmed circuits died with this Tor → allow re-warming
 }
 
 bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socksPort, QString& errOut)
