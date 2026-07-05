@@ -43,6 +43,75 @@ Item {
         : "connecting"
     readonly property color cachingYellow: Theme.palette.warning
 
+    // #32 player-bar line 2 while connecting: reassurance messages (Tor/p2p/patience), SHUFFLED —
+    // a shuffle-bag so each shows once per pass in random order, then re-shuffles (no repeats within a pass).
+    property int connectMsgIndex: 0
+    property var msgBag: []
+    property int msgBagPos: 0
+    function reshuffleMsgs() {
+        var a = []
+        for (var i = 0; i < root.connectMsgs.length; i++) a.push(i)
+        for (var j = a.length - 1; j > 0; j--) {          // Fisher–Yates
+            var k = Math.floor(Math.random() * (j + 1))
+            var t = a[j]; a[j] = a[k]; a[k] = t
+        }
+        root.msgBag = a; root.msgBagPos = 0
+        if (a.length) root.connectMsgIndex = a[0]
+    }
+    function nextMsg() {
+        root.msgBagPos = root.msgBagPos + 1
+        if (root.msgBagPos >= root.msgBag.length) reshuffleMsgs()   // full pass done → re-shuffle
+        else root.connectMsgIndex = root.msgBag[root.msgBagPos]
+    }
+    readonly property var connectMsgs: [
+        // — the vibe: patience over an onion connection —
+        "Tor connection can be slow — that's what protects the streamer's privacy.",
+        "Connecting, hang loose.",
+        "The only good system is a sound system.",
+        "Radio waves are owned by governments — that's why we went p2p.",
+        "No central server means decentralisation (and patience while we connect).",
+        "Routing through onion layers — three hops for your anonymity.",
+        "No middlemen, no ads, no logs — just the signal.",
+        "Building a circuit through volunteers' relays worldwide.",
+        "Slow radio is free radio.",
+        "Nobody knows who's listening. Not even us. That's the point.",
+        "Can't be deplatformed if there's no platform.",
+        "Handshaking with the hidden service.",
+        "Patience is a small price for a station no one can shut down.",
+        "The revolution will not be centralised.",
+        // — this module's lineage —
+        "This module is inspired by “Farewell to Westphalia”, by Jarrad Hope & Peter Ludlow.",
+        "Farewell to Westphalia: exit the nation-state, enter the network.",
+        // — the OG cypherpunks —
+        "“Cypherpunks write code.” — Eric Hughes",
+        "“Privacy is necessary for an open society in the electronic age.” — Eric Hughes",
+        "“We must defend our own privacy if we expect to have any.” — Eric Hughes",
+        "“Encryption is fundamentally a private act.” — Eric Hughes",
+        "“Privacy in an open society requires anonymous transaction systems.” — Eric Hughes",
+        "“The Net interprets censorship as damage and routes around it.” — John Gilmore",
+        "“A specter is haunting the modern world — the specter of crypto anarchy.” — Timothy May",
+        "“Arise, you have nothing to lose but your barbed wire fences!” — Timothy May",
+        "“Cryptography is the ultimate form of non-violent direct action.” — Julian Assange",
+        "“The universe believes in encryption.” — Julian Assange",
+        "“If privacy is outlawed, only outlaws will have privacy.” — Phil Zimmermann",
+        "“Trusted third parties are security holes.” — Nick Szabo"
+    ]
+    // #32 player-bar line 2 while playing: the station's host label + privacy (matches the list row)
+    // #32 secondary line for a station (shared by the list row AND the player bar):
+    //   onion → "Anonymous over Tor" (or "<host> over Tor"); otherwise "<host> · <privacy>".
+    function hostLine(host, privacy) {
+        var h = (host && host.length) ? host : "anonymous"
+        if ((privacy || "").toLowerCase() === "onion")
+            return (h.toLowerCase() === "anonymous" ? "Anonymous" : h) + " over Tor"
+        return h + (privacy ? " · " + privacy : "")
+    }
+    function playingHostLine() {
+        var ss = root.stations()
+        for (var i = 0; i < ss.length; i++)
+            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy)
+        return "Anonymous over Tor"
+    }
+
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
     readonly property bool   nodeReady:    backend ? backend.nodeReady    : false
     readonly property bool   discovering:  backend ? backend.discovering  : false
@@ -281,7 +350,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: (modelData.host || "anonymous") + " · " + (modelData.privacy || "")
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
@@ -299,8 +368,11 @@ Item {
                     visible: list.count === 0
                     horizontalAlignment: Text.AlignHCenter
                     color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    text: root.discovering ? "Listening for stations…\nnone announced yet"
-                                           : "Starting discovery…"
+                    // #34 don't claim "none announced" until the network is actually up (badge not yellow/red)
+                    text: (root.status === "Connected" || root.status === "PartiallyConnected")
+                            ? (root.discovering ? "Listening for stations…\nnone announced yet" : "Starting discovery…")
+                        : root.status === "Disconnected" ? "Disconnected — retrying…"
+                        : "Connecting to the network…"
                 }
             }
         }
@@ -308,35 +380,56 @@ Item {
         // ── Player bar (#9: Connecting… / Caching… breathing-yellow → orange ▶ Playing) ──
         Rectangle {
             id: playerBar
-            Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium; clip: true
+            Layout.fillWidth: true; radius: Theme.spacing.radiusMedium; clip: true
+            implicitHeight: Math.max(52, barRow.implicitHeight + 2 * Theme.spacing.small)   // grows for wrapped quotes
+            Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
             visible: root.nowPlaying.length > 0
             readonly property bool live: root.playPhase === "playing"   // audio actually out (ffplay clock)
             color: root.bgSecondary; border.width: 1
             border.color: playerBar.live ? root.accent : root.cachingYellow
 
             RowLayout {
-                anchors { fill: parent; leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium
-                          topMargin: Theme.spacing.small; bottomMargin: Theme.spacing.small }
+                id: barRow
+                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium }
                 spacing: Theme.spacing.small
                 LogosText {
                     id: phaseSym
-                    text: playerBar.live ? "▶" : "◌"
+                    text: playerBar.live ? "▶" : "●"      // filled dot while connecting, ▶ when playing
                     color: playerBar.live ? root.accent : root.cachingYellow
-                    font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 10
+                    font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 12
                     horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
+                    transformOrigin: Item.Center
+                    // prominent breath: fade + pulse the filled dot until audio is out
                     SequentialAnimation {
-                        id: breathe; running: !playerBar.live; loops: Animation.Infinite   // breathe until audio is out
-                        NumberAnimation { target: phaseSym; property: "opacity"; from: 1.0; to: 0.35; duration: 600 }
-                        NumberAnimation { target: phaseSym; property: "opacity"; from: 0.35; to: 1.0; duration: 600 }
-                        onRunningChanged: if (!running) phaseSym.opacity = 1
+                        id: breathe; running: !playerBar.live; loops: Animation.Infinite
+                        ParallelAnimation {
+                            NumberAnimation { target: phaseSym; property: "opacity"; from: 1.0; to: 0.25; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: phaseSym; property: "scale";   from: 1.0; to: 1.5;  duration: 750; easing.type: Easing.InOutSine }
+                        }
+                        ParallelAnimation {
+                            NumberAnimation { target: phaseSym; property: "opacity"; from: 0.25; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: phaseSym; property: "scale";   from: 1.5;  to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                        }
+                        onRunningChanged: if (!running) { phaseSym.opacity = 1; phaseSym.scale = 1 }
                     }
                 }
-                LogosText {
-                    text: root.playPhase === "playing"    ? root.nowPlaying
-                        : root.playPhase === "connecting" ? ("Connecting… · " + root.nowPlaying)
-                        :                                   ("Caching… · " + root.nowPlaying)
-                    font.pixelSize: Theme.typography.primaryText; Layout.fillWidth: true
-                    elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
+                Column {   // #32 two lines, like the station row
+                    Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; spacing: 0
+                    LogosText {                    // line 1 — always the station name
+                        text: root.nowPlaying
+                        font.pixelSize: Theme.typography.primaryText
+                        width: parent.width; elide: Text.ElideRight
+                    }
+                    LogosText {                    // line 2 — host·privacy when playing, rotating msg while connecting
+                        text: playerBar.live ? root.playingHostLine()
+                            : root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
+                        color: playerBar.live ? root.textSecondary : root.cachingYellow
+                        font.pixelSize: Theme.typography.secondaryText
+                        width: parent.width
+                        wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
+                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                    }
                 }
                 LogosButton {   // #19: perfect-round stop icon
                     text: "■"
@@ -345,6 +438,14 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: root.stopPlay()
                 }
+            }
+            // #32 rotate the connecting messages every ~4.5s; random start for variety; only while not live
+            Timer {
+                id: msgRotate
+                interval: 7000; repeat: true   // slow enough to read a full line (incl. wrapped quotes)
+                running: playerBar.visible && !playerBar.live
+                onRunningChanged: if (running) root.reshuffleMsgs()   // fresh shuffled bag each connect
+                onTriggered: root.nextMsg()
             }
         }
 
