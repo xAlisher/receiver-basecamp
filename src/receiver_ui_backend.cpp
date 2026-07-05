@@ -99,6 +99,7 @@ void ReceiverUiBackend::onContextReady()
     // connectionStateChanged that delivery emits DURING createNode reenters this single ui-host thread
     // while it's blocked on createNode's reply → deadlock (sync-ipc-reentrancy). See wireDeliveryEvents().
     diag(QStringLiteral("onContextReady: modules() wired"));
+    setPublicTopic(directoryTopic());   // #44 expose the public directory topic for the list filter
     QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire deferred startDiscovery")); startDiscovery(); });
 }
 
@@ -203,7 +204,7 @@ QString ReceiverUiBackend::addTopic(QString topic)
     topic = topic.trimmed();
     if (topic.isEmpty()) return QStringLiteral("empty topic");
     if (!subscribeTopic(topic)) return QStringLiteral("subscribe failed");
-    log("added topic " + topic);
+    log("switched to topic " + topic);
     return QString();
 }
 
@@ -320,7 +321,7 @@ QString ReceiverUiBackend::prewarm(QString streamUrl)
     if (!isOnionUrl(streamUrl)) return QString();       // only .onion needs a listener Tor
     if (!m_playingUrl.isEmpty()) return QString();      // already playing
     if (m_torListen && m_torListen->state() == QProcess::Running) return QString();   // Tor already up
-    log(QStringLiteral("readying Tor for playback…"));
+    log(QStringLiteral("Prepping Tor for playback…"));
     ensureTorListen();   // spawn + bootstrap now so Play doesn't wait for it
     return QString();
 }

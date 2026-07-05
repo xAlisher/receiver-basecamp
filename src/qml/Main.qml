@@ -130,9 +130,15 @@ Item {
     readonly property int    listenBuffer: backend ? backend.listenBuffer : 20
     readonly property bool   hideCache:    backend ? backend.hideCache    : false
 
+    // #44 a private topic REPLACES the view: selectedTopic ("" = public directory) → activeTopic filters the list
+    property string selectedTopic: ""
+    readonly property string activeTopic: selectedTopic.length > 0 ? selectedTopic : (backend ? backend.publicTopic : "")
     function stations() {
         if (!backend) return []
-        try { return JSON.parse(backend.stationsJson) } catch (e) { return [] }
+        var all
+        try { all = JSON.parse(backend.stationsJson) } catch (e) { return [] }
+        var at = root.activeTopic
+        return all.filter(function(s) { return (s.topic || "") === at })
     }
 
     function startPlay(url, name) { if (backend) backend.play(url, name) }   // phase derives from the backend
@@ -358,16 +364,43 @@ Item {
             }
         }
 
-        // ── Add a private topic ──
-        LogosTextField {
-            id: topicField
+        // ── Add a private topic (#44: replaces the view; keeps the topic; ✕ returns to public) ──
+        Item {
+            id: topicRow
             Layout.fillWidth: true
-            placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
+            implicitHeight: topicField.implicitHeight
+            readonly property string tt: topicField.text.trim()
+            readonly property bool active: tt.length > 0 && tt === root.selectedTopic   // submitted = current view
+            function submit() { if (backend && topicRow.tt.length) { backend.addTopic(topicRow.tt); root.selectedTopic = topicRow.tt } }
+            LogosTextField {
+                id: topicField
+                width: parent.width
+                placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
+            }
+            LogosButton {                            // "Switch" — populated but not yet the active topic
+                visible: topicRow.tt.length > 0 && !topicRow.active
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.tiny }
+                text: "Switch"
+                implicitHeight: Math.max(24, topicField.implicitHeight - 8)
+                onClicked: topicRow.submit()
+            }
+            LogosText {                              // ✕ — active topic → clear back to the public directory
+                visible: topicRow.active
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.small }
+                text: "✕"; font.pixelSize: Theme.typography.secondaryText
+                color: clearArea.containsMouse ? root.accent : root.textMuted
+                MouseArea {
+                    id: clearArea; anchors.fill: parent; anchors.margins: -6
+                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: { topicField.text = ""; root.selectedTopic = "" }
+                }
+            }
         }
         Connections {
             target: topicField.textInput
             function onAccepted() {
-                if (backend && topicField.text.trim().length) { backend.addTopic(topicField.text.trim()); topicField.text = "" }
+                var t = topicField.text.trim()
+                if (backend && t.length) { backend.addTopic(t); root.selectedTopic = t }   // keep the text + switch the view to it
             }
         }
 
