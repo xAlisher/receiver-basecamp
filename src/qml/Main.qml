@@ -650,6 +650,8 @@ Item {
                     // status label (playing/caching). Circle fills accent on hover.
                     Item {
                         id: statusText
+                        z: 1                            // sit above rowArea (declared later) so the STOP button
+                                                        // intercepts its click instead of falling through → replay
                         anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
                         anchors.verticalCenter: parent.verticalCenter
                         readonly property bool active: (root.nowPlaying === modelData.name)
