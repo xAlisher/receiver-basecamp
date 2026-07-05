@@ -508,20 +508,19 @@ Item {
                     id: wave
                     visible: playerBar.live
                     Layout.alignment: Qt.AlignVCenter
-                    height: 22; spacing: 2
+                    height: 28; spacing: 2
+                    property real phase: 0
+                    // one animated phase drives all bars; ×2 (integer) → the loop wraps seamlessly.
+                    NumberAnimation on phase { running: wave.visible; from: 0; to: 6.2832; duration: 900; loops: Animation.Infinite }
                     Repeater {
                         model: 11
                         delegate: Rectangle {
-                            width: 2.5; radius: width / 2
-                            anchors.verticalCenter: parent.verticalCenter
+                            width: 3; radius: width / 2
+                            anchors.verticalCenter: parent.verticalCenter    // grows both ways from the centre line
                             color: root.accent
-                            readonly property real hi: 5 + (wave.height - 7) * Math.sin(Math.PI * (index + 0.5) / 11)  // wave: tall centre
-                            height: 4
-                            SequentialAnimation on height {
-                                running: wave.visible; loops: Animation.Infinite
-                                NumberAnimation { to: hi; duration: 300 + (index * 51) % 360; easing.type: Easing.InOutSine }
-                                NumberAnimation { to: 4;  duration: 280 + (index * 37) % 340; easing.type: Easing.InOutSine }
-                            }
+                            readonly property real d: Math.abs(index - 5)     // distance from the centre bar → symmetric ripple
+                            // full-range amplitude, rippling outward from the centre (bars at equal d move together)
+                            height: 3 + (wave.height - 3) * (0.5 + 0.5 * Math.sin(wave.phase * 2 - d * 0.85))
                         }
                     }
                 }
