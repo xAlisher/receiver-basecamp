@@ -321,7 +321,7 @@ QString ReceiverUiBackend::prewarm(QString streamUrl)
     if (!isOnionUrl(streamUrl)) return QString();       // only .onion needs a listener Tor
     if (!m_playingUrl.isEmpty()) return QString();      // already playing
     if (m_torListen && m_torListen->state() == QProcess::Running) return QString();   // Tor already up
-    log(QStringLiteral("Preparing Tor for playback…"));
+    log(QStringLiteral("Prepping Tor for playback…"));
     ensureTorListen();   // spawn + bootstrap now so Play doesn't wait for it
     return QString();
 }
