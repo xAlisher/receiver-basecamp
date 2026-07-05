@@ -167,11 +167,9 @@ Item {
     // pseudonymous, not anonymous, so this is the honest framing); append " · <pgp words>" when the
     // announce is signed + verified. Direct → "<host> · <privacy>" + the words when verified.
     function hostLine(host, privacy, fingerprint, keySource) {
-        var hasId = fingerprint && fingerprint.length
-        if (keySource === "keycard" && hasId) return fingerprint   // #4 Keycard = a real identity → just the words
-        var fp = hasId ? " · " + fingerprint : ""
+        var fp = (fingerprint && fingerprint.length) ? " · " + fingerprint : ""
         if ((privacy || "").toLowerCase() === "onion")
-            return "IP hidden by Tor" + fp
+            return "IP hidden by Tor" + fp        // all Tor stations: "IP hidden by Tor · <fingerprint>"
         var h = (host && host.length) ? host : "anonymous"
         return h + (privacy ? " · " + privacy : "") + fp
     }
