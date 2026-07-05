@@ -100,9 +100,13 @@ Item {
     function playingHostLine() {
         var ss = root.stations()
         for (var i = 0; i < ss.length; i++)
-            if (ss[i].name === root.nowPlaying)
-                return (ss[i].host || "anonymous") + " · " + (ss[i].privacy || "")
-        return "anonymous"
+            if (ss[i].name === root.nowPlaying) {
+                var host = ss[i].host || "anonymous"
+                if ((ss[i].privacy || "") === "onion")
+                    return (host === "anonymous" ? "Anonymous" : host) + " over Tor"
+                return host + ((ss[i].privacy) ? " · " + ss[i].privacy : "")
+            }
+        return "Anonymous over Tor"
     }
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
