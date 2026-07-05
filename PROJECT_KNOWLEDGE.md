@@ -169,6 +169,42 @@ cached the failure** — after the onion returns it keeps failing; `pkill -f rec
 tap spawns a clean Tor. Receiver-side fix owed (#12): reap+respawn the listener Tor on failure; reconsider
 ffplay `-live_start_index -42`/`-autoexit` (gives up on a cold/short playlist).
 
+## Resilience + honest play-state epic (2026-07-05) — the receiver side of #12 shipped
+
+**Detect real playback state from ffplay's `-stats` stderr** (the load-bearing fact — measured, don't
+re-derive). Spawn ffplay with `-stats`; the status line is `<master clock> M-A: … aq= <N>KB …`:
+- **leading field `nan`** = connecting/buffering, **a real number** = audio is ACTUALLY out (the master
+  clock only ticks once samples hit the device). Measured transition: `nan → 4395.23` at the first sample.
+- **`aq= 0KB`** prints even with zero data (the initial line); **`aq> 0`** = ffplay pulled real stream
+  bytes. So `aq>0` ≠ "playing" — it's "buffering/connect-works", one step earlier than the clock.
+→ Three honest phases: **connecting** (no bytes) → **caching** (`aq>0`) → **playing** (clock ticks).
+Drive the UI off these PROPs, never a countdown timer (the old cache countdown flipped to "Playing" over
+silence). `buffering` + `playbackLive` PROPs expose them; `torStatus` polls `Bootstrapped N%` from the
+listener tor's own log (off/booting/ready/failed) for the header service badge.
+
+**No-audio watchdog (#23):** ffplay with `-infbuf` **buffers silent instead of exiting** on a stuck Tor
+rendezvous, so the exit-based #21 retry never fires. Watchdog: no `aq>0` within a window → **reap the
+listener Tor + retry**. Tuning that actually works: window must exceed a fresh Tor's ~25s bootstrap+connect
+(35s), and **reap up to 3×** before giving up — one window falsely reports a reachable station "unreachable"
+(Tor onion rendezvous is 9s–>55s variable; a live station connects within a retry or two). Message: NOT
+"offline" — say "couldn't reach over Tor" (the station is usually live; the onion descriptor went dark).
+
+**Pre-warm the rendezvous does NOT work — don't re-attempt it (#26/#28/#29 → reverted #30).** ffplay owns
+the audio out of a separate process, and a warm SOCKS socket to the onion *is* the rendezvous — the same
+slow op moved earlier, so it only helps if it completes before Play, and it hangs (connecting) without
+erroring so retry never fires. The only reliable win kept: spawn the listener Tor early on discovery/hover
+(saves the ~11s bootstrap). Fast is owned by the multi-reap recovery, not a pre-build.
+
+**Multi-instance footgun:** `/tmp/receiver_ui/torlisten-*` is **NOT XDG-isolated** — shared across every
+Basecamp instance. Running two isolated instances → their Tor reaps fight in the shared dir, and a play
+"never resolves". Symptom looked like a receiver bug; was instance interference. Reap orphaned playback by
+**PPID=1** (parent ui-host dead), or scope to your own instance.
+
+**Self-match-safe reap command** (shown in Settings, #35): `pkill -f 'receiver_ui/torliste[n]|ffplay.*cookieChe[c]k'`.
+The `[n]`/`[c]` bracket char-classes match the real strings (`torlisten`, `cookieCheck`) but keep the
+pattern from matching the pkill's own command line (classic `grep '[s]shd'` trick). `cookieCheck` is unique
+to the receiver's ffplay; require `ffplay` before it (a bare `cookieCheck` matched an unrelated grep in test).
+
 ## Reserved isolated environment (DO NOT touch from other work)
 
 - `~/logos-basecamp-radio-only.AppImage` is the **268 build (`ef6dca8b`)** — the one where receiver
