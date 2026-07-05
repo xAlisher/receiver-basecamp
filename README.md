@@ -29,9 +29,9 @@ out-of-band anchor — share it so listeners pin the *right* key:
 
 ## ✅ Platform status — works on v0.2.0 (current)
 
-> **macOS users:** on **macOS** the module uses the **relay architecture** and is **verified working**
-> on a current host (cpp-sdk ≥ #68) — see [**macOS (arm64)**](#macos-arm64--verified-working-relay-architecture)
-> below. `getClient` works on mac; the blocker there was only a stale host cpp-sdk, long fixed.
+> **macOS users:** the universal `receiver_ui` is **verified working on the released macOS Basecamp v0.2.1**
+> (Apple Silicon) — discovery, identity verification, pin, and `.onion` playback (via the privoxy bridge).
+> See [**macOS (arm64)**](#macos-arm64--verified-working-on-released-v021) below for install + deps.
 
 **On Linux this module works on the current Basecamp build (`v0.2.0`, verified 2026-07-04):** discovery
 starts, the delivery node connects, and the design-system UI renders. The old **268-only** restriction is
@@ -115,7 +115,7 @@ PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
 # 3. Install the SIGNED LGX from the v0.2.0 release (✓ Signed by xAlisher — no --allow-unsigned).
 curl -fL -o receiver_ui-0.2.0.2-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0/receiver_ui-0.2.0.2-linux-amd64.lgx
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0.2/receiver_ui-0.2.0.2-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
         install --file receiver_ui-0.2.0.2-linux-amd64.lgx
