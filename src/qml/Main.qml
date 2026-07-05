@@ -344,8 +344,8 @@ Item {
 
             ColumnLayout {
                 id: setCol
-                anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.spacing.small }
-                spacing: Theme.spacing.small
+                anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.spacing.medium }
+                spacing: Theme.spacing.medium   // clearer separation between setting blocks
 
                 // #2/#3/#44 Private directory — subscribe to a private directory instead of the public one
                 ColumnLayout {
@@ -397,7 +397,7 @@ Item {
                     Layout.fillWidth: true; spacing: Theme.spacing.tiny
                     RowLayout {
                         Layout.fillWidth: true
-                        LogosText { text: "Listener buffer"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+                        LogosText { text: "Listener buffer"; color: root.textPrimary; font.pixelSize: Theme.typography.primaryText }
                         Item { Layout.fillWidth: true }
                         LogosText { text: root.listenBuffer + "s"; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont }
                     }
@@ -508,7 +508,7 @@ Item {
                     Layout.fillWidth: true
                     height: (modelData.online && (modelData.nowPlaying || "").length > 0) ? 76 : 56
                     radius: Theme.spacing.radiusMedium
-                    color: pinRowArea.containsMouse && modelData.online ? root.bgPrimary : root.rowBase
+                    color: pinRowArea.containsMouse && modelData.online ? root.bgActive : root.rowBase   // #2 surface (not page bg) so hover doesn't blend
                     opacity: modelData.online ? 1.0 : 0.55
                     Rectangle {                          // dot: online → ok, offline → muted
                         id: pdot
@@ -566,9 +566,9 @@ Item {
                                 visible: pinState.active && root.playPhase === "playing"
                                 anchors.centerIn: parent; width: 26; height: 26; radius: 13
                                 color: pinStopArea.containsMouse ? root.accent : "transparent"
-                                border.width: 1; border.color: root.accent
+                                border.width: 1; border.color: pinStopArea.containsMouse ? root.accent : root.textPrimary
                                 StopIcon { anchors.centerIn: parent; width: 11; height: 11
-                                    iconColor: pinStopArea.containsMouse ? root.bgPrimary : root.accent }
+                                    iconColor: pinStopArea.containsMouse ? root.bgPrimary : root.textPrimary }
                                 MouseArea { id: pinStopArea; anchors.fill: parent; hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                             }
@@ -676,9 +676,9 @@ Item {
                             visible: statusText.active && root.playPhase === "playing"
                             anchors.centerIn: parent; width: 26; height: 26; radius: 13
                             color: stopArea.containsMouse ? root.accent : "transparent"
-                            border.width: 1; border.color: root.accent
+                            border.width: 1; border.color: stopArea.containsMouse ? root.accent : root.textPrimary
                             StopIcon { anchors.centerIn: parent; width: 11; height: 11
-                                iconColor: stopArea.containsMouse ? root.bgPrimary : root.accent }
+                                iconColor: stopArea.containsMouse ? root.bgPrimary : root.textPrimary }
                             MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                         }
