@@ -27,6 +27,7 @@ public:
     QString addTopic(QString topic) override;
     QString play(QString streamUrl, QString stationName) override;
     QString prewarm(QString streamUrl) override;   // #26 pre-build the Tor circuit to an onion on select
+    void    prewarmConnect(const QString& host, int attempt);   // #29 warm socket w/ retry+logging
     QString stopPlayback() override;
     QString setBuffer(int sec) override;
     QString setCacheHidden(bool on) override;

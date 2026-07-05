@@ -36,6 +36,8 @@ constexpr int    kPatientMs      = 55000; // #23 per-reap patient window — a f
 constexpr int    kMaxReaps       = 3;     // #23 reap up to this many times before giving up — a LIVE station
                                           // connects within a retry or two; one window is too eager (false "unreachable").
 constexpr int    kMaxPrewarm     = 4;     // #28 cap auto-warmed onion circuits — station announces are untrusted
+constexpr int    kMaxWarmTries   = 6;     // #29 warm-socket retries — early tries fail while the Tor bootstraps
+constexpr int    kWarmRetryMs    = 5000;  // #29 backoff between warm-socket attempts
 const char* const kSettingsOrg = "logos";
 const char* const kSettingsApp = "receiver_ui";
 const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
@@ -323,20 +325,38 @@ QString ReceiverUiBackend::prewarm(QString streamUrl)
     if (m_prewarmedHosts.size() >= kMaxPrewarm) return QString();   // #28 cap — station announces are untrusted
     if (!ensureTorListen().isEmpty() || m_listenSocksPort <= 0) return QString();
     m_prewarmedHosts.insert(host);
+    diag(QStringLiteral("pre-warming %1").arg(host));
+    prewarmConnect(host, 1);
+    return QString();
+}
+
+void ReceiverUiBackend::prewarmConnect(const QString& host, int attempt)
+{
+    // #29 The listener Tor is still bootstrapping on the first tries, so the warm socket errors — retry
+    // with backoff until it lands after bootstrap (the SOCKS connection then holds through the rendezvous),
+    // logging each step so we can confirm the circuit was actually pre-built (vs. just getting lucky).
+    if (!m_prewarmedHosts.contains(host) || m_listenSocksPort <= 0) return;   // reaped / cleared
+    if (isOnionUrl(m_playingUrl) && QUrl(m_playingUrl).host() == host) return;   // now playing it — the play IS the warm
     QTcpSocket* s = new QTcpSocket(this);
     s->setProxy(QNetworkProxy(QNetworkProxy::Socks5Proxy, QStringLiteral("127.0.0.1"), quint16(m_listenSocksPort)));
-    connect(s, &QTcpSocket::connected, this, [this, s, host] {
-        diag(QStringLiteral("pre-warmed Tor circuit to %1").arg(host));   // rendezvous built + descriptor cached
-        s->abort(); s->deleteLater();
+    connect(s, &QTcpSocket::connected, this, [this, s, host, attempt] {
+        diag(QStringLiteral("pre-warmed %1 (attempt %2) — rendezvous circuit built").arg(host).arg(attempt));
+        s->abort(); s->deleteLater();   // circuit + descriptor now cached; the eventual play reuses them
     });
-    connect(s, &QAbstractSocket::errorOccurred, this, [this, s, host] {
-        m_prewarmedHosts.remove(host);   // warming failed → let a later hover/discovery try again
+    connect(s, &QAbstractSocket::errorOccurred, this, [this, s, host, attempt] {
         s->deleteLater();
+        if (attempt < kMaxWarmTries && m_prewarmedHosts.contains(host)) {
+            diag(QStringLiteral("pre-warm %1 failed (attempt %2/%3) — retrying (Tor likely still bootstrapping)")
+                     .arg(host).arg(attempt).arg(kMaxWarmTries));
+            QTimer::singleShot(kWarmRetryMs, this, [this, host, attempt] { prewarmConnect(host, attempt + 1); });
+        } else {
+            diag(QStringLiteral("pre-warm %1 gave up after %2 attempts").arg(host).arg(attempt));
+            m_prewarmedHosts.remove(host);   // allow a later hover/discovery to try again
+        }
     });
     QPointer<QTcpSocket> sp = s;
-    QTimer::singleShot(50000, this, [sp] { if (sp) sp->abort(); });   // cap the warm attempt (→ errorOccurred → cleanup)
+    QTimer::singleShot(50000, this, [sp] { if (sp) sp->abort(); });   // cap a single attempt (→ errorOccurred)
     s->connectToHost(host, 80);
-    return QString();
 }
 
 QString ReceiverUiBackend::startFfplay()
