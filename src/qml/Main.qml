@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 
 import Logos.Theme      // logos-design-system (native on RC3+ Basecamp) — skill: logos-design-system-adoption
 import Logos.Controls   // LogosText / LogosButton / LogosBadge / LogosSlider / LogosSwitch / LogosTextField
@@ -11,6 +12,59 @@ import Logos.Controls   // LogosText / LogosButton / LogosBadge / LogosSlider / 
 Item {
     id: root
     anchors.fill: parent
+
+    // #14 monochrome vector pin (Lucide "pin") — stroke follows iconColor; no image plugin needed.
+    // Paths live in a 24×24 space; the inner Shape is scaled to fill, the outer Item carries the click.
+    component PinIcon: Item {
+        id: pin
+        property color iconColor: root.textMuted
+        implicitWidth: 16; implicitHeight: 16
+        Shape {
+            anchors.fill: parent
+            transform: Scale { xScale: pin.width / 24; yScale: pin.height / 24 }
+            ShapePath {
+                strokeColor: pin.iconColor; strokeWidth: 2; fillColor: "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M12 17v5" }
+            }
+            ShapePath {
+                strokeColor: pin.iconColor; strokeWidth: 2; fillColor: "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" }
+            }
+        }
+    }
+    // Lucide "play" — rounded triangle. filled=true → solid (button affordance); else outline.
+    component PlayIcon: Item {
+        id: pl
+        property color iconColor: root.textMuted
+        property bool filled: false
+        implicitWidth: 14; implicitHeight: 14
+        Shape {
+            anchors.fill: parent
+            transform: Scale { xScale: pl.width / 24; yScale: pl.height / 24 }
+            ShapePath {
+                strokeColor: pl.iconColor; strokeWidth: 2; fillColor: pl.filled ? pl.iconColor : "transparent"
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" }
+            }
+        }
+    }
+    // Lucide "square" — the stop control. Filled + rounded (same style as the filled play).
+    component StopIcon: Item {
+        id: sq
+        property color iconColor: root.textMuted
+        implicitWidth: 14; implicitHeight: 14
+        Shape {
+            anchors.fill: parent
+            transform: Scale { xScale: sq.width / 24; yScale: sq.height / 24 }
+            ShapePath {
+                strokeColor: sq.iconColor; strokeWidth: 2; fillColor: sq.iconColor
+                capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M6.5 4h11a2.5 2.5 0 0 1 2.5 2.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11A2.5 2.5 0 0 1 6.5 4z" }
+            }
+        }
+    }
 
     readonly property var backend: (typeof logos !== "undefined" && logos.module)
                                    ? logos.module("receiver_ui") : null
@@ -49,6 +103,13 @@ Item {
     // #32 player-bar line 2 while connecting: reassurance messages (Tor/p2p/patience), SHUFFLED —
     // a shuffle-bag so each shows once per pass in random order, then re-shuffles (no repeats within a pass).
     property int connectMsgIndex: 0
+    property string loadingDots: ""   // #5 animated "…" for the loading block
+    Timer {
+        running: root.playPhase === "connecting" || root.playPhase === "caching"
+        interval: 400; repeat: true
+        onRunningChanged: if (!running) root.loadingDots = ""
+        onTriggered: root.loadingDots = root.loadingDots.length >= 3 ? "" : root.loadingDots + "."
+    }
     property var msgBag: []
     property int msgBagPos: 0
     function reshuffleMsgs() {
@@ -81,10 +142,11 @@ Item {
         "Can't be deplatformed if there's no platform.",
         "Handshaking with the hidden service.",
         "Patience is a small price for a station no one can shut down.",
-        "The revolution will not be centralised.",
+        "The evolution will not be centralised.",
         // — this module's lineage —
         "This module is inspired by “Farewell to Westphalia”, by Jarrad Hope & Peter Ludlow.",
         "Farewell to Westphalia: exit the nation-state, enter the network.",
+        "“Exit is culture.” — Alisher Sherali",
         // — the OG cypherpunks —
         "“Cypherpunks write code.” — Eric Hughes",
         "“Privacy is necessary for an open society in the electronic age.” — Eric Hughes",
@@ -97,28 +159,39 @@ Item {
         "“Cryptography is the ultimate form of non-violent direct action.” — Julian Assange",
         "“The universe believes in encryption.” — Julian Assange",
         "“If privacy is outlawed, only outlaws will have privacy.” — Phil Zimmermann",
-        "“Trusted third parties are security holes.” — Nick Szabo"
+        "“Trusted third parties are security holes.” — Nick Szabo",
+        "“Privacy is normal? It sounds so boring and dull. No, privacy is exceptional. It's special.” — Amir Taaki"
     ]
     // #32 player-bar line 2 while playing: the station's host label + privacy (matches the list row)
     // #32 secondary line for a station (shared by the list row AND the player bar):
     //   onion → "Anonymous over Tor" (or "<host> over Tor"); otherwise "<host> · <privacy>".
-    function hostLine(host, privacy) {
-        var h = (host && host.length) ? host : "anonymous"
+    // #13/#24 secondary line. onion → "IP hidden by Tor" (a persistent fingerprint makes a station
+    // pseudonymous, not anonymous, so this is the honest framing); append " · <pgp words>" when the
+    // announce is signed + verified. Direct → "<host> · <privacy>" + the words when verified.
+    function hostLine(host, privacy, fingerprint, keySource) {
+        var fp = (fingerprint && fingerprint.length) ? " · " + fingerprint : ""
         if ((privacy || "").toLowerCase() === "onion")
-            return (h.toLowerCase() === "anonymous" ? "Anonymous" : h) + " over Tor"
-        return h + (privacy ? " · " + privacy : "")
+            return "IP hidden by Tor" + fp        // all Tor stations: "IP hidden by Tor · <fingerprint>"
+        var h = (host && host.length) ? host : "anonymous"
+        return h + (privacy ? " · " + privacy : "") + fp
     }
     function playingHostLine() {
         var ss = root.stations()
         for (var i = 0; i < ss.length; i++)
-            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy)
-        return "Anonymous over Tor"
+            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy, ss[i].fingerprint, ss[i].keySource)
+        return "IP hidden by Tor"
     }
     // #40 current show of the station we're playing (for the player bar)
     function playingNowText() {
         var ss = root.stations()
         for (var i = 0; i < ss.length; i++)
             if (ss[i].name === root.nowPlaying) return ss[i].nowPlaying || ""
+        return ""
+    }
+    function playingDescription() {   // station description — shown in the bar when there's no now-playing
+        var ss = root.stations()
+        for (var i = 0; i < ss.length; i++)
+            if (ss[i].name === root.nowPlaying) return ss[i].description || ""
         return ""
     }
 
@@ -133,12 +206,33 @@ Item {
     // #44 a private topic REPLACES the view: selectedTopic ("" = public directory) → activeTopic filters the list
     property string selectedTopic: ""
     readonly property string activeTopic: selectedTopic.length > 0 ? selectedTopic : (backend ? backend.publicTopic : "")
+    // #4 friendly label for the directory indicator ("Public" or the private directory's <id>)
+    function directoryLabel() {
+        if (root.selectedTopic.length === 0) return "Public"
+        var m = root.selectedTopic.match(/\/radio-basecamp\/1\/([^/]+)\/json/)
+        return m ? m[1] : root.selectedTopic
+    }
     function stations() {
         if (!backend) return []
         var all
         try { all = JSON.parse(backend.stationsJson) } catch (e) { return [] }
         var at = root.activeTopic
         return all.filter(function(s) { return (s.topic || "") === at })
+    }
+    // #14 pinned stations (by pubkey), online/offline — survives reload
+    readonly property var pinnedList: {
+        if (!backend) return []
+        try { return JSON.parse(backend.pinnedJson) } catch (e) { return [] }
+    }
+    function isPinned(pubkey) {
+        if (!pubkey) return false
+        for (var i = 0; i < root.pinnedList.length; i++) if (root.pinnedList[i].pubkey === pubkey) return true
+        return false
+    }
+    function togglePin(pubkey) {
+        if (!backend || !pubkey) return
+        if (root.isPinned(pubkey)) logos.watch(backend.unpinStation(pubkey), function(){}, function(){})
+        else logos.watch(backend.pinStation(pubkey), function(){}, function(){})
     }
 
     function startPlay(url, name) { if (backend) backend.play(url, name) }   // phase derives from the backend
@@ -256,15 +350,60 @@ Item {
 
             ColumnLayout {
                 id: setCol
-                anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.spacing.small }
-                spacing: Theme.spacing.small
+                anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.spacing.medium }
+                spacing: Theme.spacing.medium   // clearer separation between setting blocks
+
+                // #2/#3/#44 Private directory — subscribe to a private directory instead of the public one
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosText { text: "Private directory"; font.pixelSize: Theme.typography.primaryText }
+                    LogosText {
+                        text: "Paste a private directory to see only its stations. ✕ returns to the public directory."
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                    Item {
+                        id: dirRow
+                        Layout.fillWidth: true
+                        implicitHeight: dirField.implicitHeight
+                        readonly property string tt: dirField.text.trim()
+                        readonly property bool active: tt.length > 0 && tt === root.selectedTopic
+                        function submit() { if (backend && dirRow.tt.length) { backend.addTopic(dirRow.tt); root.selectedTopic = dirRow.tt } }
+                        LogosTextField {
+                            id: dirField
+                            width: parent.width
+                            placeholderText: "Private directory (/radio-basecamp/1/<id>/json)"
+                        }
+                        LogosButton {
+                            visible: dirRow.tt.length > 0 && !dirRow.active
+                            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.tiny }
+                            text: "Switch"; implicitHeight: Math.max(24, dirField.implicitHeight - 8)
+                            onClicked: dirRow.submit()
+                        }
+                        LogosText {
+                            visible: dirRow.active
+                            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.small }
+                            text: "✕"; font.pixelSize: Theme.typography.secondaryText
+                            color: dirClearArea.containsMouse ? root.accent : root.textMuted
+                            MouseArea { id: dirClearArea; anchors.fill: parent; anchors.margins: -6
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: { dirField.text = ""; root.selectedTopic = "" } }
+                        }
+                    }
+                    Connections {
+                        target: dirField.textInput
+                        function onAccepted() { var t = dirField.text.trim(); if (backend && t.length) { backend.addTopic(t); root.selectedTopic = t } }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
 
                 // Listener buffer
                 ColumnLayout {
                     Layout.fillWidth: true; spacing: Theme.spacing.tiny
                     RowLayout {
                         Layout.fillWidth: true
-                        LogosText { text: "Listener buffer"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+                        LogosText { text: "Listener buffer"; color: root.textPrimary; font.pixelSize: Theme.typography.primaryText }
                         Item { Layout.fillWidth: true }
                         LogosText { text: root.listenBuffer + "s"; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont }
                     }
@@ -364,44 +503,125 @@ Item {
             }
         }
 
-        // ── Add a private topic (#44: replaces the view; keeps the topic; ✕ returns to public) ──
-        Item {
-            id: topicRow
-            Layout.fillWidth: true
-            implicitHeight: topicField.implicitHeight
-            readonly property string tt: topicField.text.trim()
-            readonly property bool active: tt.length > 0 && tt === root.selectedTopic   // submitted = current view
-            function submit() { if (backend && topicRow.tt.length) { backend.addTopic(topicRow.tt); root.selectedTopic = topicRow.tt } }
-            LogosTextField {
-                id: topicField
-                width: parent.width
-                placeholderText: "+ Add a private topic (/radio-basecamp/1/<id>/json)"
-            }
-            LogosButton {                            // "Switch" — populated but not yet the active topic
-                visible: topicRow.tt.length > 0 && !topicRow.active
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.tiny }
-                text: "Switch"
-                implicitHeight: Math.max(24, topicField.implicitHeight - 8)
-                onClicked: topicRow.submit()
-            }
-            LogosText {                              // ✕ — active topic → clear back to the public directory
-                visible: topicRow.active
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacing.small }
-                text: "✕"; font.pixelSize: Theme.typography.secondaryText
-                color: clearArea.containsMouse ? root.accent : root.textMuted
-                MouseArea {
-                    id: clearArea; anchors.fill: parent; anchors.margins: -6
-                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: { topicField.text = ""; root.selectedTopic = "" }
+        // ── #14 Pinned stations — above the topic search; survive reload; online/offline matched by pubkey ──
+        ColumnLayout {
+            Layout.fillWidth: true; spacing: Theme.spacing.tiny
+            visible: root.pinnedList.length > 0
+            LogosText { text: "Pinned stations"; color: root.textMuted; font.pixelSize: Theme.typography.secondaryText }
+            Repeater {
+                model: root.pinnedList
+                delegate: Rectangle {
+                    Layout.fillWidth: true
+                    height: (modelData.online && ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0)) ? 76 : 56
+                    radius: Theme.spacing.radiusMedium
+                    color: pinRowArea.containsMouse && modelData.online ? root.bgActive : root.rowBase   // #2 surface (not page bg) so hover doesn't blend
+                    opacity: modelData.online ? 1.0 : 0.55
+                    Rectangle {                          // dot: online → ok, offline → muted
+                        id: pdot
+                        anchors.left: parent.left; anchors.leftMargin: Theme.spacing.medium
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 8; height: 8; radius: 4; color: modelData.online ? root.ok : root.textMuted
+                    }
+                    Column {
+                        anchors.left: pdot.right; anchors.leftMargin: Theme.spacing.small
+                        anchors.right: pinCtl.left; anchors.rightMargin: Theme.spacing.small
+                        anchors.verticalCenter: parent.verticalCenter; spacing: Theme.spacing.tiny
+                        LogosText { text: (modelData.name || "(unnamed)") + (modelData.online ? "" : " · offline")
+                               color: modelData.online ? root.textPrimary : root.textMuted
+                               font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { visible: modelData.online && ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0)
+                               text: (modelData.nowPlaying || "").length > 0 ? "Playing now: " + modelData.nowPlaying : (modelData.description || "")
+                               color: (modelData.nowPlaying || "").length > 0 ? root.accent : root.textSecondary
+                               font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
+                               color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                    }
+                    MouseArea {                          // row click → play (only when online)
+                        id: pinRowArea; anchors.fill: parent; hoverEnabled: true
+                        cursorShape: modelData.online ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: if (modelData.online) root.startPlay(modelData.streamUrl, modelData.name)
+                    }
+                    Row {                                // right controls — declared last so they're on top of pinRowArea
+                        id: pinCtl
+                        anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
+                        anchors.verticalCenter: parent.verticalCenter; spacing: Theme.spacing.small
+                        PinIcon {                        // #1 pin LEFT of play — unpin (pinned → accent; hover gray = will remove)
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 15; height: 15
+                            iconColor: unpinArea.containsMouse ? root.textMuted : root.accent
+                            MouseArea { id: unpinArea; anchors.fill: parent; anchors.margins: -6
+                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: root.togglePin(modelData.pubkey) }
+                        }
+                        Item {                           // #3 play button, OR the play-state dot when this pinned station is active
+                            id: pinState
+                            width: 26; height: 26
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property bool active: (root.nowPlaying === modelData.name)
+                            LogosText {                   // active + loading → breathing yellow dot
+                                id: pinDot
+                                visible: pinState.active && root.playPhase !== "playing"
+                                anchors.centerIn: parent; text: "●"; color: root.cachingYellow
+                                font.pixelSize: Theme.typography.primaryText; transformOrigin: Item.Center
+                                SequentialAnimation on opacity {
+                                    running: pinDot.visible; loops: Animation.Infinite
+                                    NumberAnimation { from: 1.0; to: 0.3; duration: 750; easing.type: Easing.InOutSine }
+                                    NumberAnimation { from: 0.3; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                                }
+                            }
+                            Rectangle {                   // active + playing → STOP button
+                                visible: pinState.active && root.playPhase === "playing"
+                                anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                                color: pinStopArea.containsMouse ? root.accent : "transparent"
+                                border.width: 1; border.color: pinStopArea.containsMouse ? root.accent : root.textPrimary
+                                Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2.5
+                                    color: pinStopArea.containsMouse ? root.bgPrimary : root.textPrimary }
+                                MouseArea { id: pinStopArea; anchors.fill: parent; hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
+                            }
+                            Rectangle {                   // play circle (when not the active playback)
+                                visible: !pinState.active
+                                anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                                color: (modelData.online && pinPlayArea.containsMouse) ? root.ok : "transparent"
+                                border.width: 1; border.color: modelData.online ? root.ok : root.textMuted
+                                PlayIcon {
+                                    anchors.centerIn: parent; anchors.horizontalCenterOffset: 1
+                                    width: 12; height: 12; filled: true
+                                    iconColor: !modelData.online ? root.textMuted
+                                             : (pinPlayArea.containsMouse ? root.bgPrimary : root.ok)
+                                }
+                                MouseArea {
+                                    id: pinPlayArea; anchors.fill: parent; hoverEnabled: true; enabled: modelData.online
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.startPlay(modelData.streamUrl, modelData.name)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-        Connections {
-            target: topicField.textInput
-            function onAccepted() {
-                var t = topicField.text.trim()
-                if (backend && t.length) { backend.addTopic(t); root.selectedTopic = t }   // keep the text + switch the view to it
+
+        // #4 Directory indicator (H2 subtitle) — input lives in Settings; ✎ (right after the name) opens it
+        RowLayout {
+            Layout.fillWidth: true; spacing: Theme.spacing.small
+            LogosText {
+                text: "Directory: " + root.directoryLabel()
+                color: root.textPrimary
+                font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
+                elide: Text.ElideRight
             }
+            LogosText {                              // ✎ edit → open Settings — right after the label, not far right
+                text: "✎"; font.pixelSize: Theme.typography.secondaryText
+                color: dirEditArea.containsMouse ? root.accent : root.textMuted
+                Layout.alignment: Qt.AlignVCenter
+                MouseArea {
+                    id: dirEditArea; anchors.fill: parent; anchors.margins: -6
+                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: root.settingsOpen = true
+                }
+            }
+            Item { Layout.fillWidth: true }          // filler keeps label + ✎ left-aligned
         }
 
         // ── Station list ──
@@ -416,7 +636,7 @@ Item {
                 model: root.stations()
                 delegate: Rectangle {
                     width: list.width; radius: Theme.spacing.radiusMedium
-                    height: (modelData.nowPlaying || "").length > 0 ? 66 : 52   // #40 taller for the now-playing line
+                    height: ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0) ? 76 : 56   // taller for the info line
                     // recessed row inset (surfaceRecessed, subtle vs the panel); hover lifts to the page bg
                     color: rowArea.containsMouse ? root.bgPrimary : root.rowBase
                     // anchor-based row — deterministic positions, no RowLayout slack distribution
@@ -433,41 +653,56 @@ Item {
                         anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
                         anchors.verticalCenter: parent.verticalCenter
                         readonly property bool active: (root.nowPlaying === modelData.name)
-                        width: active ? lbl.implicitWidth : 26
+                        width: 26
                         height: 26
-                        Rectangle {                     // circular play button (idle)
+                        Rectangle {                     // circular play button — unified green (matches pinned/live)
                             visible: !statusText.active
                             anchors.centerIn: parent; width: 26; height: 26; radius: 13
-                            color: rowArea.containsMouse ? root.accent : "transparent"
-                            border.width: 1; border.color: rowArea.containsMouse ? root.accent : root.borderColor
-                            LogosText {
-                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1  // optical: nudge ▶ right
-                                text: "▶"; font.pixelSize: Theme.typography.secondaryText
-                                color: rowArea.containsMouse ? root.bgPrimary : root.textMuted
+                            color: rowArea.containsMouse ? root.ok : "transparent"
+                            border.width: 1; border.color: root.ok
+                            PlayIcon {
+                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1  // optical nudge
+                                width: 12; height: 12; filled: true
+                                iconColor: rowArea.containsMouse ? root.bgPrimary : root.ok
                             }
                         }
-                        LogosText {                     // status label (playing / caching)
+                        LogosText {                     // #6 active + loading → breathing yellow dot
                             id: lbl
-                            visible: statusText.active
+                            visible: statusText.active && root.playPhase !== "playing"
                             anchors.centerIn: parent
-                            text: root.playPhase === "playing" ? "playing"
-                                : root.playPhase === "connecting" ? "connecting…" : "caching…"
-                            color: root.playPhase === "playing" ? root.accent : root.cachingYellow
-                            font.pixelSize: Theme.typography.secondaryText
+                            text: "●"; color: root.cachingYellow
+                            font.pixelSize: Theme.typography.primaryText
+                            transformOrigin: Item.Center
+                            SequentialAnimation on opacity {
+                                running: lbl.visible; loops: Animation.Infinite
+                                NumberAnimation { from: 1.0; to: 0.3; duration: 750; easing.type: Easing.InOutSine }
+                                NumberAnimation { from: 0.3; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                            }
+                        }
+                        Rectangle {                     // active + playing → STOP button (stop from the row)
+                            visible: statusText.active && root.playPhase === "playing"
+                            anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                            color: stopArea.containsMouse ? root.accent : "transparent"
+                            border.width: 1; border.color: stopArea.containsMouse ? root.accent : root.textPrimary
+                            Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 2.5
+                                color: stopArea.containsMouse ? root.bgPrimary : root.textPrimary }
+                            MouseArea { id: stopArea; anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor; onClicked: root.stopPlay() }
                         }
                     }
                     Column {                     // name + host, exactly small-gap right of the dot
                         anchors.left: dot.right; anchors.leftMargin: Theme.spacing.small
                         anchors.right: statusText.left; anchors.rightMargin: Theme.spacing.small
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: 0
+                        spacing: Theme.spacing.tiny
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: root.hostLine(modelData.host, modelData.privacy)
+                        LogosText {                     // now-playing, or the station description when there's no metadata
+                               visible: (modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0
+                               text: (modelData.nowPlaying || "").length > 0 ? "Playing now: " + modelData.nowPlaying : (modelData.description || "")
+                               color: (modelData.nowPlaying || "").length > 0 ? root.accent : root.textSecondary
+                               font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText {                     // #40 now-playing (from the announce; hidden when empty)
-                               visible: (modelData.nowPlaying || "").length > 0
-                               text: "Playing now: " + (modelData.nowPlaying || "")
-                               color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
@@ -475,6 +710,20 @@ Item {
                         // #26 hovering a station = intent to play → pre-build its Tor circuit so Play is fast
                         onEntered: if (backend) backend.prewarm(modelData.streamUrl)
                         onClicked: root.startPlay(modelData.streamUrl, modelData.name)
+                    }
+                    // #14 pin toggle — verified stations only (pin anchors on pubkey). Declared after rowArea so
+                    // it sits on top and captures its own click without triggering play.
+                    PinIcon {                        // #6 gray by default → orange when pinned or hovered
+                        visible: (modelData.pubkey || "").length > 0
+                        anchors.right: statusText.left; anchors.rightMargin: Theme.spacing.small
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 15; height: 15
+                        iconColor: (root.isPinned(modelData.pubkey) || pinArea.containsMouse) ? root.accent : root.textMuted
+                        MouseArea {
+                            id: pinArea; anchors.fill: parent; anchors.margins: -6
+                            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.togglePin(modelData.pubkey)
+                        }
                     }
                 }
 
@@ -489,6 +738,41 @@ Item {
                             ? (root.discovering ? "Looking for stations…" : "Starting discovery…")
                         : root.status === "Disconnected" ? "Disconnected — retrying…"
                         : "Connecting to the network…"
+                }
+            }
+        }
+
+        // #5 Loading block — reserved above the player bar while connecting/caching. The patience lines live
+        // here (centered, bigger) so the player bar itself shows the real station content the whole time.
+        Rectangle {
+            Layout.fillWidth: true; radius: Theme.spacing.radiusMedium
+            visible: root.nowPlaying.length > 0 && (root.playPhase === "connecting" || root.playPhase === "caching")
+            implicitHeight: loadCol.implicitHeight + 2 * Theme.spacing.medium
+            Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+            color: root.bgSecondary; border.width: 1; border.color: root.borderColor
+            ColumnLayout {
+                id: loadCol
+                anchors.centerIn: parent; width: parent.width - 2 * Theme.spacing.medium
+                spacing: Theme.spacing.small
+                // "Connecting to station" stays put; the dots animate in a fixed-width slot so nothing jumps
+                Row {
+                    Layout.alignment: Qt.AlignHCenter
+                    LogosText {
+                        text: root.playPhase === "caching" ? "Caching from station" : "Connecting to station"
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    }
+                    LogosText {
+                        width: 18                  // reserves space for "…" so the centered label doesn't shift
+                        text: root.loadingDots
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    }
+                }
+                LogosText {                        // patience lines — white + bigger, centered
+                    Layout.fillWidth: true
+                    text: root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
+                    color: root.textPrimary; font.pixelSize: Theme.typography.panelTitleText
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                    Behavior on opacity { NumberAnimation { duration: 250 } }
                 }
             }
         }
@@ -509,13 +793,20 @@ Item {
                 anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
                           leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium }
                 spacing: Theme.spacing.small
-                LogosText {
+                Item {
                     id: phaseSym
-                    text: playerBar.live ? "▶" : "●"      // filled dot while connecting, ▶ when playing
-                    color: playerBar.live ? root.accent : root.cachingYellow
-                    font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 12
-                    horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: 12; implicitHeight: 12
+                    Layout.preferredWidth: 12; Layout.alignment: Qt.AlignVCenter
                     transformOrigin: Item.Center
+                    LogosText {                            // connecting → breathing filled dot
+                        anchors.centerIn: parent; visible: !playerBar.live
+                        text: "●"; color: root.cachingYellow; font.pixelSize: Theme.typography.secondaryText
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    PlayIcon {                             // playing → vector play (matches the list)
+                        anchors.centerIn: parent; visible: playerBar.live
+                        width: 11; height: 11; filled: true; iconColor: root.accent
+                    }
                     // prominent breath: fade + pulse the filled dot until audio is out
                     SequentialAnimation {
                         id: breathe; running: !playerBar.live; loops: Animation.Infinite
@@ -531,25 +822,23 @@ Item {
                     }
                 }
                 Column {   // #32 two lines, like the station row
-                    Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; spacing: 0
+                    Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; spacing: Theme.spacing.tiny
                     LogosText {                    // line 1 — always the station name
                         text: root.nowPlaying
                         font.pixelSize: Theme.typography.primaryText
                         width: parent.width; elide: Text.ElideRight
                     }
-                    LogosText {                    // line 2 — host·privacy when playing, rotating msg while connecting
-                        text: playerBar.live ? root.playingHostLine()
-                            : root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
-                        color: playerBar.live ? root.textSecondary : root.cachingYellow
+                    LogosText {                    // now-playing, or the station description when there's no metadata
+                        visible: playerBar.live && (root.playingNowText().length > 0 || root.playingDescription().length > 0)
+                        text: root.playingNowText().length > 0 ? "Playing now: " + root.playingNowText() : root.playingDescription()
+                        color: root.playingNowText().length > 0 ? root.accent : root.textSecondary
                         font.pixelSize: Theme.typography.secondaryText
-                        width: parent.width
-                        wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                        width: parent.width; elide: Text.ElideRight
                     }
-                    LogosText {                    // #40 line 3 — now-playing show (while playing, if announced)
-                        visible: playerBar.live && root.playingNowText().length > 0
-                        text: "Playing now: " + root.playingNowText()
-                        color: root.accent; font.pixelSize: Theme.typography.secondaryText
+                    LogosText {                    // #5 identity line — always (patience lines moved to the loading block)
+                        text: root.playingHostLine()
+                        color: root.textSecondary
+                        font.pixelSize: Theme.typography.secondaryText
                         width: parent.width; elide: Text.ElideRight
                     }
                 }
@@ -575,12 +864,18 @@ Item {
                         }
                     }
                 }
-                LogosButton {   // #19: perfect-round stop icon
-                    text: "■"
+                LogosButton {   // #19: perfect-round stop button, Lucide "square" glyph
+                    id: stopBtn
+                    text: ""
                     implicitWidth: 30; implicitHeight: 30
                     radius: 15      // width/2 → perfect circle, not a rounded rect
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: root.stopPlay()
+                    StopIcon {
+                        anchors.centerIn: parent
+                        width: 12; height: 12
+                        iconColor: stopBtn.hovered ? root.accent : root.textPrimary
+                    }
                 }
             }
             // #32 rotate the connecting messages every ~4.5s; random start for variety; only while not live

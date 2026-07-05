@@ -1,4 +1,5 @@
 #include "receiver_ui_backend.h"
+#include "station_identity.h"  // #13 verify announce signatures (secp256k1)
 #include "logos_sdk.h"        // generated: modules().delivery_module (Qt-typed) — #20 universal
 #include "logos_types.h"
 
@@ -80,6 +81,7 @@ ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
     setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
+    loadPins();   // #14 restore pinned stations (persist across module reload)
 
     m_pruneTimer = new QTimer(this);
     m_pruneTimer->setInterval(kPruneMs);
@@ -243,12 +245,43 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
     s.name      = name;
     s.host      = o.value(QStringLiteral("hostLabel")).toString();
     s.streamUrl = o.value(QStringLiteral("streamUrl")).toString();
-    s.privacy   = o.value(QStringLiteral("privacy")).toString();
+    // Detect onion from the stream URL (the announce doesn't carry a privacy field) so the UI shows
+    // "IP hidden by Tor" instead of the "anonymous" host label. Falls back to any announced privacy.
+    s.privacy   = isOnionUrl(s.streamUrl) ? QStringLiteral("onion") : o.value(QStringLiteral("privacy")).toString();
     s.topic     = o.value(QStringLiteral("announceTopic")).toString();
     // #40 now-playing: attacker-controllable announce data — cap length + strip control chars before render
     s.nowPlaying = o.value(QStringLiteral("nowPlaying")).toString()
                      .remove(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]"))).left(120);
+    s.description = o.value(QStringLiteral("description")).toString()   // fallback when no now-playing
+                     .remove(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]"))).left(200);
     s.lastSeenMs = QDateTime::currentMSecsSinceEpoch();
+
+    // #13 verify station identity. v:2 carries pubkey + sig over the canonical (sig-less) announce bytes;
+    // an invalid signature is a forgery/tamper → DROP. v:1 (unsigned) is kept as anonymous/unverified.
+    const int ver = o.value(QStringLiteral("v")).toInt(1);
+    const QString pubkey = o.value(QStringLiteral("pubkey")).toString();
+    const QString sig    = o.value(QStringLiteral("sig")).toString();
+    if (ver >= 2 && !pubkey.isEmpty() && !sig.isEmpty()) {
+        QJsonObject signedObj = o;
+        signedObj.remove(QStringLiteral("sig"));
+        const QByteArray canon = QJsonDocument(signedObj).toJson(QJsonDocument::Compact);
+        if (!StationIdentity::verify(pubkey, sig, canon)) {
+            log("dropped forged announce for \"" + s.name + "\" (bad signature)");
+            return;
+        }
+        s.pubkey      = pubkey;
+        s.fingerprint = StationIdentity::fingerprint(pubkey);
+        s.keySource   = signedObj.value(QStringLiteral("keySource")).toString();  // #4 trusted (inside the verified bytes)
+        s.verified    = true;
+        // #14 keep a pinned station's last-known name/topic fresh (so it shows the right name while offline).
+        if (m_pinnedMeta.contains(pubkey)) {
+            QJsonObject m = m_pinnedMeta.value(pubkey);
+            m["name"] = s.name; m["topic"] = s.topic; m["streamUrl"] = s.streamUrl;
+            m["privacy"] = s.privacy; m["fingerprint"] = s.fingerprint;
+            m_pinnedMeta.insert(pubkey, m);
+            savePins();
+        }
+    }
 
     const QString key = s.topic + "|" + s.name;
     const bool isNew = !m_stations.contains(key);
@@ -283,10 +316,83 @@ void ReceiverUiBackend::publishStations()
         o["privacy"]   = s.privacy;
         o["topic"]     = s.topic;
         o["nowPlaying"] = s.nowPlaying;   // #40
+        o["description"] = s.description; // shown when now-playing is empty
+        o["verified"]   = s.verified;     // #13 identity
+        o["pubkey"]     = s.pubkey;
+        o["fingerprint"] = s.fingerprint;
+        o["keySource"]  = s.keySource;    // #4 keycard vs autogen (display)
         o["uptimeS"]   = (double)((now - s.lastSeenMs) / 1000);
         arr.append(o);
     }
     setStationsJson(QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+    publishPinned();
+}
+
+// #14 pin a verified station by its pubkey. Only verified (signed) stations have an identity to pin to.
+QString ReceiverUiBackend::pinStation(QString pubkey)
+{
+    pubkey = pubkey.trimmed();
+    if (pubkey.isEmpty()) return QStringLiteral("only verified stations can be pinned");
+    QJsonObject meta{{"pubkey", pubkey}, {"fingerprint", StationIdentity::fingerprint(pubkey)}};
+    for (const Station& s : m_stations)
+        if (s.pubkey == pubkey) {
+            meta["name"] = s.name; meta["topic"] = s.topic; meta["streamUrl"] = s.streamUrl; meta["privacy"] = s.privacy;
+            break;
+        }
+    m_pinnedMeta.insert(pubkey, meta);
+    savePins();
+    publishPinned();
+    log("pinned station");
+    return QString();
+}
+
+QString ReceiverUiBackend::unpinStation(QString pubkey)
+{
+    m_pinnedMeta.remove(pubkey.trimmed());
+    savePins();
+    publishPinned();
+    return QString();
+}
+
+// online = a live station currently carries this pubkey (m_stations is already TTL-pruned). Display fields
+// come from the live announce when online, else the last-known persisted meta (shows the remembered name).
+void ReceiverUiBackend::publishPinned()
+{
+    QJsonArray arr;
+    for (auto it = m_pinnedMeta.constBegin(); it != m_pinnedMeta.constEnd(); ++it) {
+        QJsonObject o = it.value();
+        const Station* live = nullptr;
+        for (const Station& s : m_stations)
+            if (s.pubkey == it.key()) { live = &s; break; }
+        o["online"] = (live != nullptr);
+        o["pinned"] = true;
+        if (live) {
+            o["name"] = live->name; o["streamUrl"] = live->streamUrl; o["privacy"] = live->privacy;
+            o["topic"] = live->topic; o["nowPlaying"] = live->nowPlaying; o["fingerprint"] = live->fingerprint;
+            o["description"] = live->description;
+        }
+        arr.append(o);
+    }
+    setPinnedJson(QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+}
+
+void ReceiverUiBackend::loadPins()
+{
+    QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
+    const QJsonArray arr = QJsonDocument::fromJson(s.value(QStringLiteral("pinnedMeta")).toByteArray()).array();
+    for (const QJsonValue& v : arr) {
+        const QJsonObject o = v.toObject();
+        const QString pk = o.value(QStringLiteral("pubkey")).toString();
+        if (!pk.isEmpty()) m_pinnedMeta.insert(pk, o);
+    }
+}
+
+void ReceiverUiBackend::savePins()
+{
+    QJsonArray arr;
+    for (const QJsonObject& o : m_pinnedMeta) arr.append(o);
+    QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
+    s.setValue(QStringLiteral("pinnedMeta"), QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
 QString ReceiverUiBackend::play(QString streamUrl, QString stationName)

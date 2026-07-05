@@ -11,6 +11,7 @@ class ReceiverUi
     PROP(QString lastError="" READONLY)
 
     PROP(QString stationsJson="[]" READONLY)                  // JSON array of live stations (TTL-pruned)
+    PROP(QString pinnedJson="[]" READONLY)                    // #14 pinned stations (keyed by pubkey), online/offline
     PROP(QString nowPlaying="" READONLY)                      // station name currently playing ("" = stopped)
     PROP(bool    playbackLive=false READONLY)                 // ffplay master clock ticking = audio actually OUT
     PROP(bool    buffering=false READONLY)                    // ffplay aq>0 = stream bytes arriving (caching);
@@ -24,6 +25,8 @@ class ReceiverUi
     SLOT(QString startDiscovery())                            // createNode/start/subscribe directory topic
     SLOT(QString stopDiscovery())
     SLOT(QString addTopic(QString topic))                     // subscribe to a private/extra topic
+    SLOT(QString pinStation(QString pubkey))                  // #14 pin a verified station by its identity
+    SLOT(QString unpinStation(QString pubkey))                // #14 unpin
     SLOT(QString play(QString streamUrl, QString stationName))
     SLOT(QString prewarm(QString streamUrl))                  // #26 build the Tor rendezvous circuit on select → fast play
     SLOT(QString stopPlayback())

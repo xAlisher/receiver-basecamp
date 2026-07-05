@@ -12,7 +12,7 @@
   "codegen": { "rep": "src/receiver_ui.rep" },
 
   "nix": {
-    "packages": { "build": [], "runtime": ["tor", "torsocks", "ffmpeg"] },
+    "packages": { "build": ["pkg-config"], "runtime": ["tor", "torsocks", "ffmpeg", "secp256k1"] },
     "external_libraries": [],
     "cmake": {
       "find_packages": [],
