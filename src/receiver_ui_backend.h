@@ -26,6 +26,7 @@ public:
     QString stopDiscovery() override;
     QString addTopic(QString topic) override;
     QString play(QString streamUrl, QString stationName) override;
+    QString prewarm(QString streamUrl) override;   // #26/#30 spawn the listener Tor early on select/discovery
     QString stopPlayback() override;
     QString setBuffer(int sec) override;
     QString setCacheHidden(bool on) override;
@@ -75,6 +76,7 @@ private:
     int           m_playAttempt = 0;    // consecutive auto-retries for the current station (#12)
     QTimer*       m_watchdog    = nullptr;  // #23 no-audio watchdog (single-shot per play attempt)
     bool          m_audioFlowing = false;   // #23 ffplay emitted decode stats → real audio is flowing
+    int           m_reapCount   = 0;        // #23 how many times we've reaped the listener Tor this play
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;

@@ -34,9 +34,13 @@ Item {
     property bool settingsOpen: false
     property var  events: []
 
-    // #9 caching-on-play: idle | caching | playing — Caching shows a countdown over the buffer secs
-    property string playPhase: "idle"
-    property int    cacheLeft:  0
+    // #9 true play-state, DERIVED from the backend (never a timer):
+    //   connecting = Tor rendezvous, no bytes yet · caching = bytes arriving (aq>0) · playing = audio out (clock)
+    readonly property string playPhase:
+        (!backend || backend.nowPlaying.length === 0) ? "idle"
+        : backend.playbackLive ? "playing"
+        : backend.buffering    ? "caching"
+        : "connecting"
     readonly property color cachingYellow: Theme.palette.warning
 
     readonly property string status:      backend ? backend.connectionStatus : "no backend"
@@ -51,36 +55,12 @@ Item {
         try { return JSON.parse(backend.stationsJson) } catch (e) { return [] }
     }
 
-    // #9 — enter the Caching phase (countdown over the listener buffer), then flip to Playing.
-    function startPlay(url, name) {
-        if (!backend) return
-        backend.play(url, name)
-        root.playPhase = "caching"
-        root.cacheLeft = Math.max(1, root.listenBuffer)
-        cacheTimer.restart()
-    }
-    function stopPlay() {
-        if (backend) backend.stopPlayback()
-        root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
-    }
-
-    Timer {
-        id: cacheTimer; interval: 1000; repeat: true
-        onTriggered: {
-            if (root.cacheLeft > 0) root.cacheLeft--
-            if (root.cacheLeft <= 0) { root.playPhase = "playing"; cacheTimer.stop() }
-        }
-    }
+    function startPlay(url, name) { if (backend) backend.play(url, name) }   // phase derives from the backend
+    function stopPlay()           { if (backend) backend.stopPlayback() }
 
     Connections {
         target: backend
         ignoreUnknownSignals: true
-        // external stop / backend reports stopped → leave the caching/playing phase
-        function onNowPlayingChanged() {
-            if (backend && backend.nowPlaying.length === 0 && root.playPhase !== "idle") {
-                root.playPhase = "idle"; root.cacheLeft = 0; cacheTimer.stop()
-            }
-        }
         function onActivity(line) {
             var next = root.events.slice()
             next.unshift("[" + Qt.formatTime(new Date(), "hh:mm:ss") + "] " + line)
@@ -90,6 +70,10 @@ Item {
     }
 
     Rectangle { anchors.fill: parent; color: root.bgPrimary }
+
+    // clipboard helper — the sandbox has no Clipboard API; TextEdit.copy() is the proven path (radio_ui #12)
+    function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy(); clipHelper.text = "" }
+    TextEdit { id: clipHelper; visible: false }
 
     ColumnLayout {
         anchors.fill: parent
@@ -120,6 +104,7 @@ Item {
             // live connection state: Connected→success, PartiallyConnected→warning, Disconnected→error, and
             // neutral textSecondary while starting. (LogosBadge renders AllUppercase; source stays lowercase.)
             LogosBadge {
+                id: statusBadge
                 Layout.alignment: Qt.AlignVCenter
                 text:  root.status === "Connected"         ? "discovering"
                      : root.status === "PartiallyConnected" ? "partial peers"
@@ -136,11 +121,16 @@ Item {
             // cogwheel — no gear icon asset ships with the module, so a tokenized custom toggle
             // (LogosIconButton needs an iconSource url). Active state borders in the accent colour.
             Rectangle {
-                width: 28; height: 28; radius: Theme.spacing.radiusSmall
+                // #31 match the status badge height (keeper cogwheel pattern) — not a hardcoded 28
+                implicitWidth: statusBadge.implicitHeight; implicitHeight: statusBadge.implicitHeight
+                Layout.alignment: Qt.AlignVCenter
+                radius: Theme.spacing.radiusSmall
                 color: gearArea.containsMouse ? root.bgSecondary : "transparent"
                 border.color: root.settingsOpen ? root.accent : root.borderColor; border.width: 1
                 LogosText {
-                    anchors.centerIn: parent; text: "⚙"
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    text: "⚙"
                     font.pixelSize: Theme.typography.primaryText
                     color: root.settingsOpen ? root.accent : root.textSecondary
                 }
@@ -279,8 +269,9 @@ Item {
                             id: lbl
                             visible: statusText.active
                             anchors.centerIn: parent
-                            text: root.playPhase === "caching" ? "caching…" : "playing"
-                            color: root.playPhase === "caching" ? root.cachingYellow : root.accent
+                            text: root.playPhase === "playing" ? "playing"
+                                : root.playPhase === "connecting" ? "connecting…" : "caching…"
+                            color: root.playPhase === "playing" ? root.accent : root.cachingYellow
                             font.pixelSize: Theme.typography.secondaryText
                         }
                     }
@@ -296,6 +287,8 @@ Item {
                     MouseArea {
                         id: rowArea; anchors.fill: parent; hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        // #26 hovering a station = intent to play → pre-build its Tor circuit so Play is fast
+                        onEntered: if (backend) backend.prewarm(modelData.streamUrl)
                         onClicked: root.startPlay(modelData.streamUrl, modelData.name)
                     }
                 }
@@ -312,26 +305,14 @@ Item {
             }
         }
 
-        // ── Player bar (#9: breathing-yellow Caching… countdown → orange Playing) ──
+        // ── Player bar (#9: Connecting… / Caching… breathing-yellow → orange ▶ Playing) ──
         Rectangle {
             id: playerBar
             Layout.fillWidth: true; height: 44; radius: Theme.spacing.radiusMedium; clip: true
             visible: root.nowPlaying.length > 0
-            readonly property bool caching: root.playPhase === "caching"
+            readonly property bool live: root.playPhase === "playing"   // audio actually out (ffplay clock)
             color: root.bgSecondary; border.width: 1
-            border.color: playerBar.caching ? root.cachingYellow : root.accent
-
-            // #19: caching progress fill — transparent yellow, grows left→right as the cache
-            // countdown completes ((buffer-left)/buffer). Behind the content; clipped to the bar.
-            Rectangle {
-                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                visible: playerBar.caching
-                width: playerBar.caching
-                       ? parent.width * Math.max(0, Math.min(1, (root.listenBuffer - root.cacheLeft) / Math.max(1, root.listenBuffer)))
-                       : 0
-                color: Qt.rgba(root.cachingYellow.r, root.cachingYellow.g, root.cachingYellow.b, 0.18)
-                Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.Linear } }
-            }
+            border.color: playerBar.live ? root.accent : root.cachingYellow
 
             RowLayout {
                 anchors { fill: parent; leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium
@@ -339,19 +320,21 @@ Item {
                 spacing: Theme.spacing.small
                 LogosText {
                     id: phaseSym
-                    text: playerBar.caching ? "◌" : "▶"
-                    color: playerBar.caching ? root.cachingYellow : root.accent
+                    text: playerBar.live ? "▶" : "◌"
+                    color: playerBar.live ? root.accent : root.cachingYellow
                     font.pixelSize: Theme.typography.secondaryText; Layout.preferredWidth: 10
                     horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignVCenter
                     SequentialAnimation {
-                        id: breathe; running: playerBar.caching; loops: Animation.Infinite
+                        id: breathe; running: !playerBar.live; loops: Animation.Infinite   // breathe until audio is out
                         NumberAnimation { target: phaseSym; property: "opacity"; from: 1.0; to: 0.35; duration: 600 }
                         NumberAnimation { target: phaseSym; property: "opacity"; from: 0.35; to: 1.0; duration: 600 }
                         onRunningChanged: if (!running) phaseSym.opacity = 1
                     }
                 }
                 LogosText {
-                    text: playerBar.caching ? ("Caching… " + root.cacheLeft + "s · " + root.nowPlaying) : root.nowPlaying
+                    text: root.playPhase === "playing"    ? root.nowPlaying
+                        : root.playPhase === "connecting" ? ("Connecting… · " + root.nowPlaying)
+                        :                                   ("Caching… · " + root.nowPlaying)
                     font.pixelSize: Theme.typography.primaryText; Layout.fillWidth: true
                     elide: Text.ElideRight; Layout.alignment: Qt.AlignVCenter
                 }
@@ -371,7 +354,26 @@ Item {
             color: root.bgSecondary; border.color: root.borderColor; border.width: 1
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: Theme.spacing.small; spacing: Theme.spacing.tiny / 2
-                LogosText { text: "Activity"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosText { text: "Activity"; color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText }
+                    Item { Layout.fillWidth: true }
+                    // copy-all icon — two overlapping rectangles (keycard ActivityLog style)
+                    Rectangle {
+                        id: copyBtn
+                        visible: root.events.length > 0
+                        implicitWidth: 20; implicitHeight: 20; color: "transparent"
+                        opacity: copyArea.containsMouse ? 0.9 : 0.5
+                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                        Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
+                        Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgSecondary; border.color: root.textMuted; border.width: 1; radius: 2 }
+                        Timer { id: copyFb; interval: 200; onTriggered: copyBtn.opacity = copyArea.containsMouse ? 0.9 : 0.5 }
+                        MouseArea {
+                            id: copyArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: { root.copyText(root.events.join("\n")); copyBtn.opacity = 0.25; copyFb.restart() }
+                        }
+                    }
+                }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                     model: root.events

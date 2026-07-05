@@ -10,6 +10,9 @@ class ReceiverUi
 
     PROP(QString stationsJson="[]" READONLY)                  // JSON array of live stations (TTL-pruned)
     PROP(QString nowPlaying="" READONLY)                      // station name currently playing ("" = stopped)
+    PROP(bool    playbackLive=false READONLY)                 // ffplay master clock ticking = audio actually OUT
+    PROP(bool    buffering=false READONLY)                    // ffplay aq>0 = stream bytes arriving (caching);
+                                                              // buffering && !playbackLive = "Caching", neither = "Connecting"
 
     PROP(int     listenBuffer=8 READONLY)                     // listener jitter buffer, seconds (2–20)
     PROP(bool    hideCache=false READONLY)                    // privacy: suppress on-disk stream cache
@@ -20,6 +23,7 @@ class ReceiverUi
     SLOT(QString stopDiscovery())
     SLOT(QString addTopic(QString topic))                     // subscribe to a private/extra topic
     SLOT(QString play(QString streamUrl, QString stationName))
+    SLOT(QString prewarm(QString streamUrl))                  // #26 build the Tor rendezvous circuit on select → fast play
     SLOT(QString stopPlayback())
     SLOT(QString setBuffer(int sec))         // mutator; reads back via the listenBuffer PROP
     SLOT(QString setCacheHidden(bool on))    // mutator; reads back via the hideCache PROP
