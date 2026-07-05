@@ -245,7 +245,9 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
     s.name      = name;
     s.host      = o.value(QStringLiteral("hostLabel")).toString();
     s.streamUrl = o.value(QStringLiteral("streamUrl")).toString();
-    s.privacy   = o.value(QStringLiteral("privacy")).toString();
+    // Detect onion from the stream URL (the announce doesn't carry a privacy field) so the UI shows
+    // "IP hidden by Tor" instead of the "anonymous" host label. Falls back to any announced privacy.
+    s.privacy   = isOnionUrl(s.streamUrl) ? QStringLiteral("onion") : o.value(QStringLiteral("privacy")).toString();
     s.topic     = o.value(QStringLiteral("announceTopic")).toString();
     // #40 now-playing: attacker-controllable announce data — cap length + strip control chars before render
     s.nowPlaying = o.value(QStringLiteral("nowPlaying")).toString()
@@ -267,6 +269,7 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         }
         s.pubkey      = pubkey;
         s.fingerprint = StationIdentity::fingerprint(pubkey);
+        s.keySource   = signedObj.value(QStringLiteral("keySource")).toString();  // #4 trusted (inside the verified bytes)
         s.verified    = true;
         // #14 keep a pinned station's last-known name/topic fresh (so it shows the right name while offline).
         if (m_pinnedMeta.contains(pubkey)) {
@@ -314,6 +317,7 @@ void ReceiverUiBackend::publishStations()
         o["verified"]   = s.verified;     // #13 identity
         o["pubkey"]     = s.pubkey;
         o["fingerprint"] = s.fingerprint;
+        o["keySource"]  = s.keySource;    // #4 keycard vs autogen (display)
         o["uptimeS"]   = (double)((now - s.lastSeenMs) / 1000);
         arr.append(o);
     }

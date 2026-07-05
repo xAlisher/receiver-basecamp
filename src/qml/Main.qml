@@ -103,6 +103,13 @@ Item {
     // #32 player-bar line 2 while connecting: reassurance messages (Tor/p2p/patience), SHUFFLED —
     // a shuffle-bag so each shows once per pass in random order, then re-shuffles (no repeats within a pass).
     property int connectMsgIndex: 0
+    property string loadingDots: ""   // #5 animated "…" for the loading block
+    Timer {
+        running: root.playPhase === "connecting" || root.playPhase === "caching"
+        interval: 400; repeat: true
+        onRunningChanged: if (!running) root.loadingDots = ""
+        onTriggered: root.loadingDots = root.loadingDots.length >= 3 ? "" : root.loadingDots + "."
+    }
     property var msgBag: []
     property int msgBagPos: 0
     function reshuffleMsgs() {
@@ -159,8 +166,10 @@ Item {
     // #13/#24 secondary line. onion → "IP hidden by Tor" (a persistent fingerprint makes a station
     // pseudonymous, not anonymous, so this is the honest framing); append " · <pgp words>" when the
     // announce is signed + verified. Direct → "<host> · <privacy>" + the words when verified.
-    function hostLine(host, privacy, fingerprint) {
-        var fp = (fingerprint && fingerprint.length) ? " · " + fingerprint : ""
+    function hostLine(host, privacy, fingerprint, keySource) {
+        var hasId = fingerprint && fingerprint.length
+        if (keySource === "keycard" && hasId) return fingerprint   // #4 Keycard = a real identity → just the words
+        var fp = hasId ? " · " + fingerprint : ""
         if ((privacy || "").toLowerCase() === "onion")
             return "IP hidden by Tor" + fp
         var h = (host && host.length) ? host : "anonymous"
@@ -169,7 +178,7 @@ Item {
     function playingHostLine() {
         var ss = root.stations()
         for (var i = 0; i < ss.length; i++)
-            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy, ss[i].fingerprint)
+            if (ss[i].name === root.nowPlaying) return root.hostLine(ss[i].host, ss[i].privacy, ss[i].fingerprint, ss[i].keySource)
         return "IP hidden by Tor"
     }
     // #40 current show of the station we're playing (for the player bar)
@@ -514,7 +523,7 @@ Item {
                         LogosText { text: (modelData.name || "(unnamed)") + (modelData.online ? "" : " · offline")
                                color: modelData.online ? root.textPrimary : root.textMuted
                                font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint)
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { visible: modelData.online && (modelData.nowPlaying || "").length > 0
                                text: "Playing now: " + (modelData.nowPlaying || "")
@@ -537,21 +546,38 @@ Item {
                                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                 onClicked: root.togglePin(modelData.pubkey) }
                         }
-                        Rectangle {                      // play — circle green if live, gray if offline
+                        Item {                           // #3 play button, OR the play-state dot when this pinned station is active
+                            id: pinState
+                            width: 26; height: 26
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 26; height: 26; radius: 13
-                            color: (modelData.online && pinPlayArea.containsMouse) ? root.ok : "transparent"
-                            border.width: 1; border.color: modelData.online ? root.ok : root.textMuted
-                            PlayIcon {
-                                anchors.centerIn: parent; anchors.horizontalCenterOffset: 1
-                                width: 12; height: 12; filled: true
-                                iconColor: !modelData.online ? root.textMuted
-                                         : (pinPlayArea.containsMouse ? root.bgPrimary : root.ok)
+                            readonly property bool active: (root.nowPlaying === modelData.name)
+                            LogosText {                   // state dot: breathing yellow (loading) → green (playing)
+                                visible: pinState.active
+                                anchors.centerIn: parent; text: "●"
+                                color: root.playPhase === "playing" ? root.ok : root.cachingYellow
+                                font.pixelSize: Theme.typography.primaryText; transformOrigin: Item.Center
+                                SequentialAnimation on opacity {
+                                    running: pinState.active && root.playPhase !== "playing"; loops: Animation.Infinite
+                                    NumberAnimation { from: 1.0; to: 0.3; duration: 750; easing.type: Easing.InOutSine }
+                                    NumberAnimation { from: 0.3; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                                }
                             }
-                            MouseArea {
-                                id: pinPlayArea; anchors.fill: parent; hoverEnabled: true; enabled: modelData.online
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.startPlay(modelData.streamUrl, modelData.name)
+                            Rectangle {                   // play circle (when not the active playback)
+                                visible: !pinState.active
+                                anchors.centerIn: parent; width: 26; height: 26; radius: 13
+                                color: (modelData.online && pinPlayArea.containsMouse) ? root.ok : "transparent"
+                                border.width: 1; border.color: modelData.online ? root.ok : root.textMuted
+                                PlayIcon {
+                                    anchors.centerIn: parent; anchors.horizontalCenterOffset: 1
+                                    width: 12; height: 12; filled: true
+                                    iconColor: !modelData.online ? root.textMuted
+                                             : (pinPlayArea.containsMouse ? root.bgPrimary : root.ok)
+                                }
+                                MouseArea {
+                                    id: pinPlayArea; anchors.fill: parent; hoverEnabled: true; enabled: modelData.online
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.startPlay(modelData.streamUrl, modelData.name)
+                                }
                             }
                         }
                     }
@@ -565,11 +591,11 @@ Item {
             LogosText {
                 text: "Directory: " + root.directoryLabel()
                 color: root.textPrimary
-                font.pixelSize: Theme.typography.panelTitleText; font.weight: Theme.typography.weightBold
+                font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
                 elide: Text.ElideRight
             }
             LogosText {                              // ✎ edit → open Settings — right after the label, not far right
-                text: "✎"; font.pixelSize: Theme.typography.primaryText
+                text: "✎"; font.pixelSize: Theme.typography.secondaryText
                 color: dirEditArea.containsMouse ? root.accent : root.textMuted
                 Layout.alignment: Qt.AlignVCenter
                 MouseArea {
@@ -610,7 +636,7 @@ Item {
                         anchors.right: parent.right; anchors.rightMargin: Theme.spacing.medium
                         anchors.verticalCenter: parent.verticalCenter
                         readonly property bool active: (root.nowPlaying === modelData.name)
-                        width: active ? lbl.implicitWidth : 26
+                        width: 26
                         height: 26
                         Rectangle {                     // circular play button — unified green (matches pinned/live)
                             visible: !statusText.active
@@ -623,14 +649,19 @@ Item {
                                 iconColor: rowArea.containsMouse ? root.bgPrimary : root.ok
                             }
                         }
-                        LogosText {                     // status label (playing / caching)
+                        LogosText {                     // #6 active → state dot: breathing yellow (loading) → green (playing)
                             id: lbl
                             visible: statusText.active
                             anchors.centerIn: parent
-                            text: root.playPhase === "playing" ? "playing"
-                                : root.playPhase === "connecting" ? "connecting…" : "caching…"
-                            color: root.playPhase === "playing" ? root.accent : root.cachingYellow
-                            font.pixelSize: Theme.typography.secondaryText
+                            text: "●"
+                            color: root.playPhase === "playing" ? root.ok : root.cachingYellow
+                            font.pixelSize: Theme.typography.primaryText
+                            transformOrigin: Item.Center
+                            SequentialAnimation on opacity {
+                                running: statusText.active && root.playPhase !== "playing"; loops: Animation.Infinite
+                                NumberAnimation { from: 1.0; to: 0.3; duration: 750; easing.type: Easing.InOutSine }
+                                NumberAnimation { from: 0.3; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+                            }
                         }
                     }
                     Column {                     // name + host, exactly small-gap right of the dot
@@ -643,7 +674,7 @@ Item {
                                visible: (modelData.nowPlaying || "").length > 0
                                text: "Playing now: " + (modelData.nowPlaying || "")
                                color: root.accent; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
-                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint)
+                        LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
                                color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                     }
                     MouseArea {
@@ -680,6 +711,34 @@ Item {
                             ? (root.discovering ? "Looking for stations…" : "Starting discovery…")
                         : root.status === "Disconnected" ? "Disconnected — retrying…"
                         : "Connecting to the network…"
+                }
+            }
+        }
+
+        // #5 Loading block — reserved above the player bar while connecting/caching. The patience lines live
+        // here (centered, bigger) so the player bar itself shows the real station content the whole time.
+        Rectangle {
+            Layout.fillWidth: true; radius: Theme.spacing.radiusMedium
+            visible: root.nowPlaying.length > 0 && (root.playPhase === "connecting" || root.playPhase === "caching")
+            implicitHeight: loadCol.implicitHeight + 2 * Theme.spacing.medium
+            Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+            color: root.bgSecondary; border.width: 1; border.color: root.cachingYellow
+            ColumnLayout {
+                id: loadCol
+                anchors.centerIn: parent; width: parent.width - 2 * Theme.spacing.medium
+                spacing: Theme.spacing.tiny
+                LogosText {                        // small — "Connecting to station…" with animated dots
+                    Layout.alignment: Qt.AlignHCenter
+                    text: (root.playPhase === "caching" ? "Caching from station" : "Connecting to station") + root.loadingDots
+                    color: root.cachingYellow; font.pixelSize: Theme.typography.secondaryText
+                    horizontalAlignment: Text.AlignHCenter
+                }
+                LogosText {                        // bigger — the patience/cypherpunk lines, centered
+                    Layout.fillWidth: true
+                    text: root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
+                    color: root.textSecondary; font.pixelSize: Theme.typography.primaryText
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                    Behavior on opacity { NumberAnimation { duration: 250 } }
                 }
             }
         }
@@ -741,14 +800,11 @@ Item {
                         color: root.accent; font.pixelSize: Theme.typography.secondaryText
                         width: parent.width; elide: Text.ElideRight
                     }
-                    LogosText {                    // identity/host when playing, rotating msg while connecting
-                        text: playerBar.live ? root.playingHostLine()
-                            : root.connectMsgs[root.connectMsgIndex % root.connectMsgs.length]
-                        color: playerBar.live ? root.textSecondary : root.cachingYellow
+                    LogosText {                    // #5 identity line — always (patience lines moved to the loading block)
+                        text: root.playingHostLine()
+                        color: root.textSecondary
                         font.pixelSize: Theme.typography.secondaryText
-                        width: parent.width
-                        wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                        width: parent.width; elide: Text.ElideRight
                     }
                 }
                 // #38 small animated soundwave near the stop button — centred rounded bars, wave-shaped

@@ -48,6 +48,7 @@ private:
         QString nowPlaying;   // #40 current show/track from the announce (may be empty)
         QString pubkey;       // #13 verified station identity ("" = unverified / anonymous v:1)
         QString fingerprint;  // #13 3-word PGP fingerprint of pubkey (for display + pin)
+        QString keySource;    // #4 "keycard" | "autogen" (from the signed announce) — drives the display
         bool    verified = false;
         qint64  lastSeenMs = 0;
     };
