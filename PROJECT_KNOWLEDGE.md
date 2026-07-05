@@ -205,6 +205,33 @@ The `[n]`/`[c]` bracket char-classes match the real strings (`torlisten`, `cooki
 pattern from matching the pkill's own command line (classic `grep '[s]shd'` trick). `cookieCheck` is unique
 to the receiver's ffplay; require `ffplay` before it (a bare `cookieCheck` matched an unrelated grep in test).
 
+## Cross-module now-playing + private topics epic (2026-07-05) — #40, #41, #44 (radio #35, #49)
+
+The listener half of two cross-module features. Both ride the existing announce/heartbeat; the broadcaster
+half lives in radio_module/radio_ui (radio PROJECT_KNOWLEDGE).
+
+**Now-playing (#40):** the announce carries an optional `nowPlaying` string (radio reads it from a file
+Liquidsoap's `on_metadata` writes). `ingestAnnounce` stores it (sanitized — attacker-controllable, so
+`.remove([\x00-\x1F\x7F]).left(120)`), `publishStations` carries it, and the list row + player bar render
+`"Playing now: <show>"` (hidden when empty). The row grows to a 3rd line; the player bar looks it up by the
+playing station name (`playingNowText()`). **The source, not the chain, is the usual failure:** PSR's
+`nowplaying.txt` was empty because the tracks had no ID3 tags → `m["title"]/m["artist"]` blank. Fix was to
+TAG the files (`ffmpeg -c copy -metadata`), not a fragile Liquidsoap filename-fallback.
+
+**Private topics (#44):** a private topic REPLACES the view (not additive). `publicTopic` PROP exposes the
+directory topic; QML tracks `selectedTopic` ("" = public) → `activeTopic = selectedTopic || publicTopic`;
+`stations()` filters to `s.topic === activeTopic`. The topic stays in the input; a **Switch** button submits
+(→ becomes **✕** which clears back to public). `addTopic` subscribes; the directory subscription persists
+(filter-only switch).
+
+**BUG that shipped an empty list (cost a user round-trip):** the filter `s.topic === activeTopic` hid EVERY
+station because the announce payload didn't carry `announceTopic`, so `s.topic` was empty. Fixed by having
+radio's `buildAnnouncePayload` include `announceTopic`. **Canonical alternative we should have used:** the
+`messageReceived` event already delivers the source topic at `data[1]` — the receiver's handler blindly
+ingests all of `d` instead of reading `data[1]` as the topic (skill: `delivery-module-messaging` → "Filter
+announces by content topic"). Follow-up: switch the handler to `data[1]` and the announce field becomes
+redundant. **Lesson:** don't filter by a payload field you haven't confirmed the sender emits.
+
 ## Reserved isolated environment (DO NOT touch from other work)
 
 - `~/logos-basecamp-radio-only.AppImage` is the **268 build (`ef6dca8b`)** — the one where receiver
