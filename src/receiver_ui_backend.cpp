@@ -173,7 +173,9 @@ void ReceiverUiBackend::publishDeps()
     rootObj.insert(QStringLiteral("os"),         os);
     rootObj.insert(QStringLiteral("items"),      items);
     rootObj.insert(QStringLiteral("installCmd"), installCmd);
-    setDepsJson(QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Compact)));
+    const QString json = QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Compact));
+    diag(QStringLiteral("publishDeps -> %1").arg(json));   // #55 confirm the payload the replica should receive
+    setDepsJson(json);
 }
 
 void ReceiverUiBackend::onContextReady()
@@ -183,6 +185,7 @@ void ReceiverUiBackend::onContextReady()
     // connectionStateChanged that delivery emits DURING createNode reenters this single ui-host thread
     // while it's blocked on createNode's reply → deadlock (sync-ipc-reentrancy). See wireDeliveryEvents().
     diag(QStringLiteral("onContextReady: modules() wired"));
+    publishDeps();   // #55 re-publish now the QML replica is connected (constructor-time set can precede remoting)
     setPublicTopic(directoryTopic());   // #44 expose the public directory topic for the list filter
     QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire deferred startDiscovery")); startDiscovery(); });
 }
