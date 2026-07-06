@@ -247,3 +247,18 @@ ui-host child stderr is swallowed (basecamp#163) and qInfo is filtered. The back
 timestamped file trail to `/tmp/receiver-diag.log` (`diag()` in `receiver_ui_plugin.cpp`) — this is
 how the getClient hang was finally pinned ("getClient(delivery_module)" line with no return). Keep it
 until the 295 issue is resolved.
+
+## DS adoption + private-topic (retro 2026-07-06)
+- **Verify the payload field exists before filtering on it.** Shipped a list filter on `s.topic ===
+  activeTopic` before confirming the announce carried `topic`; it didn't → the station list went empty.
+  The source topic was ALREADY in the `messageReceived` event at `data[1]` (documented in
+  `delivery-module-messaging`). Lesson: read the existing announce/event schema (and the `_index` recipe)
+  before building a filter on an assumed field.
+- **A derived field doesn't re-derive on auto-resume.** Flipping `visibility=private` didn't move PSR off
+  the general topic — auto-resume reads `announceTopic` **verbatim** from `station.json`. Set the concrete
+  `announceTopic`, don't rely on re-derivation from `visibility`.
+- **Compound asks: track every sub-part.** Surfaced the private topic but missed the "name it" input the
+  same request asked for. Re-hit by the user. Enumerate sub-asks of a compound request before closing.
+- **Recurring meta:** the stumbles came from not consulting `_index`/the recipe first (`data[1]`=topic,
+  `onViewModuleReadyChanged` reactive gate, delivery-demo DS components were all documented). The skills
+  worked — the gap was the lookup. Read the index sheet before choosing a fix.
