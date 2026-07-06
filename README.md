@@ -5,9 +5,10 @@ A lightweight **listen-only** Logos Basecamp module: discover decentralized radi
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
 the delivery client lives in the **ui-host** process. Interops with live `radio-basecamp` hosts.
 
-> **📦 Install:** grab the signed **[v0.2.0.3 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.0.3)**
-> (`receiver_ui-0.2.0.3-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
-> Adds **Settings ▸ Kill Tor Listeners** (#52) to reap leaked Tor proxies holding the SOCKS ports.
+> **📦 Install:** grab the signed **[v0.2.0.4 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.0.4)**
+> (`receiver_ui-0.2.0.4-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> Adds a **first-launch dependency preflight** (#55) — if `tor`/`ffplay`/`torsocks` are missing, a card shows a
+> checklist + copy-able install command + Re-check (no more silent "playback failed"); drops the `Playing now:` prefix.
 > Universal API (`modules().delivery_module`), no legacy `getClient`. Validated on Basecamp v0.2.0:
 > discovery + connection pill + `.onion` audio.
 
@@ -152,12 +153,12 @@ sudo apt install -y tor torsocks ffmpeg
 export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
 PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
-# 3. Install the SIGNED LGX from the v0.2.0.3 release (✓ Signed by xAlisher — no --allow-unsigned).
-curl -fL -o receiver_ui-0.2.0.3-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0.3/receiver_ui-0.2.0.3-linux-amd64.lgx
+# 3. Install the SIGNED LGX from the v0.2.0.4 release (✓ Signed by xAlisher — no --allow-unsigned).
+curl -fL -o receiver_ui-0.2.0.4-linux-amd64.lgx \
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0.4/receiver_ui-0.2.0.4-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-        install --file receiver_ui-0.2.0.3-linux-amd64.lgx
+        install --file receiver_ui-0.2.0.4-linux-amd64.lgx
 printf 'linux-amd64' > "$PROF/plugins/receiver_ui/variant"   # select the variant
 #   (or build from source instead of downloading: nix build .#lgx-portable — see "Build from source")
 
