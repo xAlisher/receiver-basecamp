@@ -37,16 +37,32 @@ the delivery client lives in the **ui-host** process. Interops with live `radio-
 sudo apt install -y tor torsocks ffmpeg
 ```
 
-**macOS (arm64)** — uses **privoxy**, not torsocks (torsocks' `LD_PRELOAD` shim is SIP-blocked; `.onion` plays through a privoxy→Tor bridge):
-```bash
-nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy   # or: brew install tor ffmpeg privoxy
+**macOS (Apple Silicon)** — uses **privoxy**, not torsocks (torsocks' `LD_PRELOAD` shim is SIP-blocked; `.onion` plays through a privoxy→Tor bridge). Two steps:
 
-# macOS GUI apps get a minimal PATH — point the receiver at the binaries:
-launchctl setenv RECEIVER_TOR_BIN     "$(which tor)"
-launchctl setenv RECEIVER_FFPLAY_BIN  "$(which ffplay)"
-launchctl setenv RECEIVER_PRIVOXY_BIN "$(which privoxy)"
+**Step 1 — install the helpers.** Pick the one you use:
+```bash
+# Homebrew (most macs — get it at https://brew.sh if you don't have it):
+brew install tor ffmpeg privoxy
+
+# …OR Nix, if you already run it:
+nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy
 ```
-Then fully quit and relaunch Basecamp so it inherits the new environment.
+
+**Step 2 — point Receiver at them (required).** macOS GUI apps get a minimal `PATH` that excludes both `/opt/homebrew/*` and `~/.nix-profile/bin`, so Receiver can't find the helpers on `PATH`. Set **explicit** paths (do **not** use `$(which …)` — it can print a stale/removed path, and Homebrew's `privoxy` is in `sbin`, usually off `PATH`):
+```bash
+# If you used Homebrew (Apple Silicon — Intel macs: /usr/local/bin + /usr/local/sbin):
+launchctl setenv RECEIVER_TOR_BIN     /opt/homebrew/bin/tor
+launchctl setenv RECEIVER_FFPLAY_BIN  /opt/homebrew/bin/ffplay
+launchctl setenv RECEIVER_PRIVOXY_BIN /opt/homebrew/sbin/privoxy
+
+# …OR if you used Nix:
+launchctl setenv RECEIVER_TOR_BIN     "$HOME/.nix-profile/bin/tor"
+launchctl setenv RECEIVER_FFPLAY_BIN  "$HOME/.nix-profile/bin/ffplay"
+launchctl setenv RECEIVER_PRIVOXY_BIN "$HOME/.nix-profile/bin/privoxy"
+```
+Then **fully quit and relaunch Basecamp** and press **Re-check** in the dependency card — it should clear.
+
+> Have both Nix *and* Homebrew? Point at whichever binary actually exists (`ls -l <path>`) — a removed Nix package can leave a dangling `~/.nix-profile/bin/<tool>` that `$(which)` still prints.
 
 ---
 
