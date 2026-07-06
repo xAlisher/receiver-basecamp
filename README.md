@@ -158,8 +158,9 @@ helpers are resolved from PATH. Override paths with `RADIO_TOR_BIN` / `RADIO_FFP
 - **Discover** — subscribes to the public directory topic (`/radio-basecamp/1/directory/json`) plus any
   private topics you add; live stations appear and are TTL-pruned (~45s).
 - **Listen** — tap a station → Tor-routed playback with a listener jitter buffer (rides out Tor latency).
-- **Settings cogwheel** — listener buffer (2–20s) and a **Hide cache** privacy toggle (suppress + clear
-  the on-disk stream cache).
+- **Settings cogwheel** — listener buffer, a **Hide cache** privacy toggle (suppress + clear the on-disk
+  stream cache), and **Kill Tor Listeners** (reap leaked `torlisten-*` Tor proxies still holding the SOCKS
+  ports after a crash — fixes "port in use" / stuck playback).
 
 ## Build from source
 
