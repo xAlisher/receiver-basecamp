@@ -669,7 +669,7 @@ Item {
                                color: modelData.online ? root.textPrimary : root.textMuted
                                font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { visible: modelData.online && ((modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0)
-                               text: (modelData.nowPlaying || "").length > 0 ? "Playing now: " + modelData.nowPlaying : (modelData.description || "")
+                               text: (modelData.nowPlaying || "").length > 0 ? modelData.nowPlaying : (modelData.description || "")
                                color: (modelData.nowPlaying || "").length > 0 ? root.accent : root.textSecondary
                                font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
@@ -839,7 +839,7 @@ Item {
                         LogosText { text: modelData.name || "(unnamed)"; font.pixelSize: Theme.typography.primaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText {                     // now-playing, or the station description when there's no metadata
                                visible: (modelData.nowPlaying || "").length > 0 || (modelData.description || "").length > 0
-                               text: (modelData.nowPlaying || "").length > 0 ? "Playing now: " + modelData.nowPlaying : (modelData.description || "")
+                               text: (modelData.nowPlaying || "").length > 0 ? modelData.nowPlaying : (modelData.description || "")
                                color: (modelData.nowPlaying || "").length > 0 ? root.accent : root.textSecondary
                                font.pixelSize: Theme.typography.secondaryText; width: parent.width; elide: Text.ElideRight }
                         LogosText { text: root.hostLine(modelData.host, modelData.privacy, modelData.fingerprint, modelData.keySource)
@@ -971,7 +971,7 @@ Item {
                     }
                     LogosText {                    // now-playing, or the station description when there's no metadata
                         visible: playerBar.live && (root.playingNowText().length > 0 || root.playingDescription().length > 0)
-                        text: root.playingNowText().length > 0 ? "Playing now: " + root.playingNowText() : root.playingDescription()
+                        text: root.playingNowText().length > 0 ? root.playingNowText() : root.playingDescription()
                         color: root.playingNowText().length > 0 ? root.accent : root.textSecondary
                         font.pixelSize: Theme.typography.secondaryText
                         width: parent.width; elide: Text.ElideRight
