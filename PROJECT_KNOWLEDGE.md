@@ -262,3 +262,10 @@ until the 295 issue is resolved.
 - **Recurring meta:** the stumbles came from not consulting `_index`/the recipe first (`data[1]`=topic,
   `onViewModuleReadyChanged` reactive gate, delivery-demo DS components were all documented). The skills
   worked — the gap was the lookup. Read the index sheet before choosing a fix.
+
+## Verify the RIGHT nix out-link (retro 2026-07-06, #52)
+`nix build .#lgx-portable` writes the default `./result`. The `/release` skill uses
+`--out-link result-lgx-portable`, which persists as a STALE symlink to an older build. After a plain
+`nix build`, verifying `result-lgx-portable/*.lgx` checks the OLD artifact — the symbol/QML looked missing
+though the build was fine. Always `readlink ./result` (or pass `--out-link`) and extract THAT `.lgx` before
+claiming a change shipped. (`strings` also misses Qt `QStringLiteral` — they're UTF-16; use `strings -el`.)

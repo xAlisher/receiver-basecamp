@@ -454,6 +454,24 @@ Item {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
 
+                // #52 Kill Tor Listeners — reap leaked torlisten-* tor daemons still holding the listener SOCKS ports
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosButton {
+                        Layout.alignment: Qt.AlignLeft
+                        text: "Kill Tor Listeners"
+                        implicitWidth: 160; implicitHeight: 32
+                        onClicked: if (backend) backend.killTorListeners()
+                    }
+                    LogosText {
+                        text: "Reap leaked Tor proxies (torlisten-*) still holding SOCKS ports 9250–9253 — fixes 'port in use' / stuck play after a crash. Result appears in the activity trace below."
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
+
                 // #35 orphan-stream guidance (subtle) — ffplay+Tor keep running if you close the module
                 // mid-play (#2/#10). Warn to Stop first; give a copy-able reap command for when you forget.
                 ColumnLayout {

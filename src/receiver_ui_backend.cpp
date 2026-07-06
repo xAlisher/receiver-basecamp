@@ -19,6 +19,7 @@
 #include <QCoreApplication>
 #include <QStandardPaths>
 #include <QTextStream>
+#include <csignal>   // #52 kill()/SIGKILL to reap orphaned tor listeners by PID
 #include <QTimer>
 #include <QUrl>
 
@@ -635,7 +636,7 @@ QString ReceiverUiBackend::ensureTorListen()
             return QString();
         }
     }
-    return err.isEmpty() ? QStringLiteral("tor_listen_failed") : err;
+    return err.isEmpty() ? QStringLiteral("tor_listen_failed — free stuck ports via Settings ▸ Kill Tor Listeners") : err;
 }
 
 void ReceiverUiBackend::killTorListen()
@@ -757,9 +758,9 @@ bool ReceiverUiBackend::startTorProc(QString& dir, const QString& cfg, int socks
         return fail(notFound ? QStringLiteral("tor not found (install/bundle tor)") : QStringLiteral("tor_start_failed"));
     }
     if (m_torListen->waitForFinished(500)) {   // immediate exit ⇒ bad cfg / port in use
-        qWarning() << "receiver_ui: tor exited immediately:" << m_torListen->readAll();
+        qWarning() << "receiver_ui: tor exited immediately (port in use — try Settings ▸ Kill Tor Listeners):" << m_torListen->readAll();
         m_torListen->deleteLater(); m_torListen = nullptr;
-        return fail(QStringLiteral("tor_port_in_use"));
+        return fail(QStringLiteral("tor_port_in_use — free stuck ports via Settings ▸ Kill Tor Listeners"));
     }
     log(QStringLiteral("listener tor up (SOCKS %1)").arg(socksPort));   // #27 the real port — m_listenSocksPort isn't assigned until ensureTorListen returns
     return true;
@@ -801,6 +802,48 @@ QString ReceiverUiBackend::clearCache()
     if (d.exists()) d.removeRecursively();
     log("cache cleared");
     return QString();
+}
+
+// #52 Reap leaked receiver_ui Tor listeners. Every Play spawns a `torlisten-<hex>` tor holding a SOCKS port
+// (9250–9253); a crash or an abandoned session leaves it running, so the next Play hits "port in use" /
+// can't connect. This kills THIS instance's listener + any ORPHANED torlisten-* daemon (from dead or other
+// instances), clears their /tmp dirs, and respawns a fresh one so the next Play works immediately.
+QString ReceiverUiBackend::killTorListeners()
+{
+    killTorListen();   // graceful stop of our own current listener first
+
+    int reaped = 0;
+    const QByteArray marker = QByteArrayLiteral("receiver_ui/torlisten-");
+    QDir proc(QStringLiteral("/proc"));   // Linux: scan cmdlines. (macOS has no /proc → own-kill + dir sweep still run.)
+    const auto pids = proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString& pid : pids) {
+        bool isNum = false;
+        const int p = pid.toInt(&isNum);
+        if (!isNum) continue;
+        QFile f(QStringLiteral("/proc/%1/cmdline").arg(pid));
+        if (!f.open(QIODevice::ReadOnly)) continue;
+        const QByteArray cmd = f.readAll();   // NUL-separated argv
+        f.close();
+        if (!cmd.contains(marker)) continue;  // not one of our torlisten daemons
+        // Require argv[0] to be the tor binary — NEVER SIGKILL a shell/editor/agent that merely
+        // references the path in its command line (the classic pkill -f self-match footgun). Only real tor.
+        const QByteArray argv0 = cmd.left(cmd.indexOf('\0'));
+        if (argv0 != "tor" && !argv0.endsWith("/tor")) continue;
+        ::kill(p, SIGKILL);                   // stuck listener → SIGKILL frees the SOCKS port immediately
+        ++reaped;
+    }
+
+    int dirs = 0;   // sweep the leaked torlisten-* dirs
+    QDir base(QStandardPaths::writableLocation(QStandardPaths::TempLocation) + QStringLiteral("/receiver_ui"));
+    for (const QString& d : base.entryList(QStringList() << QStringLiteral("torlisten-*"),
+                                           QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (QDir(base.filePath(d)).removeRecursively()) ++dirs;
+    }
+
+    ensureTorListen();   // fresh listener on a now-free port
+    const QString msg = QStringLiteral("killed %1 tor listener(s), cleared %2 dir(s)").arg(reaped).arg(dirs);
+    log(msg);
+    return msg;
 }
 
 QString ReceiverUiBackend::cacheDir() const

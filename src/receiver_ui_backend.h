@@ -33,6 +33,7 @@ public:
     QString setBuffer(int sec) override;
     QString setCacheHidden(bool on) override;
     QString clearCache() override;
+    QString killTorListeners() override;   // #52 reap leaked torlisten-* tor daemons + free their SOCKS ports
 
 protected:
     // Fires once modules() is wired — subscribe to delivery events + kick discovery (was initLogos).
