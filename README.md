@@ -28,16 +28,18 @@ out-of-band anchor — share it so listeners pin the *right* key:
 ![Booth — identity setup (Keycard-derived)](docs/screenshots/booth1.png)
 ![Booth — stream credentials + the fingerprint to share](docs/screenshots/booth2.png)
 
-## ✅ Platform status — works on v0.2.0 (current)
+## ✅ Platform status — works on v0.2.0 / v0.2.1
 
 > **macOS users:** the universal `receiver_ui` is **verified working on the released macOS Basecamp v0.2.1**
 > (Apple Silicon) — discovery, identity verification, pin, and `.onion` playback (via the privoxy bridge).
 > See [**macOS (arm64)**](#macos-arm64--verified-working-on-released-v021) below for install + deps.
 
-**On Linux this module works on the current Basecamp build (`v0.2.0`, verified 2026-07-04):** discovery
-starts, the delivery node connects, and the design-system UI renders. The old **268-only** restriction is
-**lifted** — the v0.2 platform migration resolved the `getClient("delivery_module")` hang that used to
-park pre-v0.2 (295-era) builds. Just run it on a current `v0.2.0` AppImage.
+**On Linux this module is verified on Basecamp `v0.2.0` (2026-07-04):** discovery starts, the delivery node
+connects, and the design-system UI renders. **`v0.2.1` is the latest host release** — it's a bug-fix release
+(module-shutdown, package-manager, and Linux UI fixes) with **no delivery/API/module-loading changes**, so
+`receiver_ui` behaves identically on it (verified on macOS `v0.2.1`; not separately re-run on a Linux
+`v0.2.1` host). The old **268-only** restriction is **lifted** — the v0.2 platform migration resolved the
+`getClient("delivery_module")` hang that used to park pre-v0.2 (295-era) builds. Run it on any `v0.2.0`+ AppImage.
 
 <details><summary>Historical — the pre-v0.2 "268-only" <code>getClient</code> hang (resolved)</summary>
 
