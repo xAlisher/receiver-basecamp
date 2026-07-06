@@ -33,4 +33,5 @@ class ReceiverUi
     SLOT(QString setBuffer(int sec))         // mutator; reads back via the listenBuffer PROP
     SLOT(QString setCacheHidden(bool on))    // mutator; reads back via the hideCache PROP
     SLOT(QString clearCache())
+    SLOT(QString killTorListeners())         // #52 reap orphaned receiver_ui torlisten-* tor daemons holding SOCKS ports
 }
