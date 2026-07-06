@@ -203,6 +203,17 @@ Item {
     readonly property int    listenBuffer: backend ? backend.listenBuffer : 20
     readonly property bool   hideCache:    backend ? backend.hideCache    : false
 
+    // #55 preflight — parse the backend's depsJson into an object the welcome card binds to. Only a real
+    // payload (one that defines `ok`) can hide/show the card; the "{}" default and any parse error read as
+    // ok:true so the card never flashes spuriously before the backend has published.
+    function parseDeps(s) {
+        var def = { ok: true, os: "", items: [], installCmd: "" }
+        if (!s) return def
+        try { var d = JSON.parse(s); return (d && typeof d.ok !== "undefined") ? d : def }
+        catch (e) { return def }
+    }
+    readonly property var deps: parseDeps(backend ? backend.depsJson : "")
+
     // #44 a private topic REPLACES the view: selectedTopic ("" = public directory) → activeTopic filters the list
     property string selectedTopic: ""
     readonly property string activeTopic: selectedTopic.length > 0 ? selectedTopic : (backend ? backend.publicTopic : "")
@@ -336,6 +347,116 @@ Item {
                     id: gearArea; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.settingsOpen = !root.settingsOpen
+                }
+            }
+        }
+
+        // ── #55 Dependency preflight — external playback helpers (tor/ffplay + torsocks·privoxy) must be on
+        //    PATH; if any are missing, guide the user with a copy-able install command + Re-check (no auto-install).
+        Rectangle {
+            Layout.fillWidth: true
+            visible: !root.deps.ok
+            implicitHeight: depCol.implicitHeight + Theme.spacing.medium * 2
+            radius: Theme.spacing.radiusSmall
+            color: root.bgSecondary; border.color: root.standby; border.width: 1
+
+            ColumnLayout {
+                id: depCol
+                anchors { left: parent.left; right: parent.right; top: parent.top
+                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
+                spacing: Theme.spacing.small
+
+                LogosText {
+                    text: "⚠ Playback needs a few tools installed"
+                    color: root.textPrimary
+                    font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                LogosText {
+                    text: "Receiver streams over Tor, so it relies on a few command-line helpers being on your PATH. "
+                        + "Install the missing ones below, then press Re-check — no restart needed."
+                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+
+                // per-helper checklist (✓ present / ✗ missing)
+                Repeater {
+                    model: root.deps.items
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Theme.spacing.small
+                        LogosText {
+                            text: modelData.present ? "✓" : "✗"
+                            color: modelData.present ? root.ok : Theme.palette.error
+                            font.pixelSize: Theme.typography.primaryText; font.family: root.monoFont
+                        }
+                        LogosText {
+                            text: modelData.name
+                            color: modelData.present ? root.textSecondary : root.textPrimary
+                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                        }
+                        LogosText {
+                            text: modelData.present ? "found" : "missing"
+                            color: modelData.present ? root.textMuted : Theme.palette.error
+                            font.pixelSize: Theme.typography.secondaryText
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+
+                LogosText {
+                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
+                    text: "Install from a terminal:"
+                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                // command box + copy icon — mirrors the Settings reap-command box
+                Rectangle {
+                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
+                    Layout.fillWidth: true
+                    implicitHeight: depCmdRow.implicitHeight + Theme.spacing.small
+                    radius: Theme.spacing.radiusSmall
+                    color: root.bgPrimary; border.color: root.borderColor; border.width: 1
+                    RowLayout {
+                        id: depCmdRow
+                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                                  leftMargin: Theme.spacing.small; rightMargin: Theme.spacing.small }
+                        spacing: Theme.spacing.small
+                        LogosText {
+                            text: root.deps.installCmd
+                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                            color: root.textSecondary
+                            Layout.fillWidth: true; elide: Text.ElideRight
+                        }
+                        Rectangle {
+                            id: depCopyBtn
+                            implicitWidth: 20; implicitHeight: 20; color: "transparent"
+                            opacity: depCopyArea.containsMouse ? 0.9 : 0.5
+                            Behavior on opacity { NumberAnimation { duration: 150 } }
+                            Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
+                            Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgPrimary; border.color: root.textMuted; border.width: 1; radius: 2 }
+                            Timer { id: depCopyFb; interval: 200; onTriggered: depCopyBtn.opacity = depCopyArea.containsMouse ? 0.9 : 0.5 }
+                            MouseArea {
+                                id: depCopyArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: { root.copyText(root.deps.installCmd); depCopyBtn.opacity = 0.25; depCopyFb.restart() }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.small
+                    LogosButton {
+                        text: "Re-check"
+                        implicitWidth: 120; implicitHeight: 32
+                        onClicked: if (backend) backend.checkDeps()
+                    }
+                    LogosText {
+                        visible: root.deps.os === "macos"
+                        text: "macOS: GUI apps get a minimal PATH — if Re-check still shows missing after installing, see the README to point Receiver at the tools."
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                    Item { Layout.fillWidth: true }
                 }
             }
         }

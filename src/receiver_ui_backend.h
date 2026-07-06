@@ -34,6 +34,7 @@ public:
     QString setCacheHidden(bool on) override;
     QString clearCache() override;
     QString killTorListeners() override;   // #52 reap leaked torlisten-* tor daemons + free their SOCKS ports
+    QString checkDeps() override;          // #55 re-run playback-helper detection → refresh depsJson
 
 protected:
     // Fires once modules() is wired — subscribe to delivery events + kick discovery (was initLogos).
@@ -63,6 +64,7 @@ private:
     void loadPins();                                 // #14 restore pinned set from QSettings
     void savePins();                                 // #14 persist pinned set to QSettings
     bool subscribeTopic(const QString& topic);
+    void publishDeps();   // #55 detect tor/ffplay + torsocks(Linux)/privoxy(mac) on PATH → depsJson
     QString directoryTopic() const;
     QString cacheDir() const;
     void log(const QString& line);

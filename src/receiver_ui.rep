@@ -20,6 +20,9 @@ class ReceiverUi
     PROP(int     listenBuffer=8 READONLY)                     // listener jitter buffer, seconds (2–20)
     PROP(bool    hideCache=false READONLY)                    // privacy: suppress on-disk stream cache
 
+    PROP(QString depsJson="{}" READONLY)                      // #55 preflight: playback-helper availability + install
+                                                              // hint — {ok,os,items:[{name,present}],installCmd}
+
     SIGNAL(activity(QString line))                            // human-readable log line for the UI
 
     SLOT(QString startDiscovery())                            // createNode/start/subscribe directory topic
@@ -34,4 +37,5 @@ class ReceiverUi
     SLOT(QString setCacheHidden(bool on))    // mutator; reads back via the hideCache PROP
     SLOT(QString clearCache())
     SLOT(QString killTorListeners())         // #52 reap orphaned receiver_ui torlisten-* tor daemons holding SOCKS ports
+    SLOT(QString checkDeps())                // #55 re-run playback-helper detection → refresh depsJson (Re-check button)
 }

@@ -84,6 +84,7 @@ ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
     setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
     loadPins();   // #14 restore pinned stations (persist across module reload)
+    publishDeps();   // #55 preflight the playback helpers so the welcome card is correct on first paint
 
     m_pruneTimer = new QTimer(this);
     m_pruneTimer->setInterval(kPruneMs);
@@ -94,6 +95,85 @@ ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
 ReceiverUiBackend::~ReceiverUiBackend()
 {
     stopPlayback();
+}
+
+QString ReceiverUiBackend::checkDeps()
+{
+    publishDeps();
+    return QString();   // "" = success — Re-check just refreshes the depsJson PROP the card binds to
+}
+
+// #55 Detect the external playback helpers on PATH and publish the JSON the first-launch card reads.
+// tor + ffplay are needed on every OS; the SOCKS shim differs (torsocks on Linux, privoxy on macOS —
+// torsocks' LD_PRELOAD shim is SIP-blocked on mac). Honors the RECEIVER_*_BIN overrides: an absolute
+// override path counts as present iff it exists+executable, otherwise we search PATH (same resolution
+// QProcess uses for a bare program name). We never auto-install (needs root / is distro-specific) — we
+// only surface the exact command for the user to paste.
+void ReceiverUiBackend::publishDeps()
+{
+    struct Req { const char* bin; const char* env; const char* pkg; };
+#ifdef __APPLE__
+    const QString os = QStringLiteral("macos");
+    const QList<Req> reqs = {
+        { "tor",     "RECEIVER_TOR_BIN",     "tor"     },
+        { "ffplay",  "RECEIVER_FFPLAY_BIN",  "ffmpeg"  },
+        { "privoxy", "RECEIVER_PRIVOXY_BIN", "privoxy" },
+    };
+#else
+    const QString os = QStringLiteral("linux");
+    const QList<Req> reqs = {
+        { "tor",      "RECEIVER_TOR_BIN",      "tor"      },
+        { "ffplay",   "RECEIVER_FFPLAY_BIN",   "ffmpeg"   },
+        { "torsocks", "RECEIVER_TORSOCKS_BIN", "torsocks" },
+    };
+#endif
+
+    QJsonArray items;
+    QStringList missingPkgs;
+    bool ok = true;
+    for (const Req& r : reqs) {
+        const QString resolved = resolveBin(QString::fromLatin1(r.bin), r.env);
+        bool present;
+        const QFileInfo fi(resolved);
+        if (fi.isAbsolute())
+            present = fi.exists() && fi.isExecutable();                        // explicit RECEIVER_*_BIN path
+        else
+            present = !QStandardPaths::findExecutable(resolved).isEmpty();     // bare name → PATH lookup
+        QJsonObject o;
+        o.insert(QStringLiteral("name"),    QString::fromLatin1(r.bin));
+        o.insert(QStringLiteral("present"), present);
+        items.append(o);
+        if (!present) {
+            const QString pkg = QString::fromLatin1(r.pkg);
+            ok = false;
+            if (!missingPkgs.contains(pkg)) missingPkgs.append(pkg);
+        }
+    }
+
+    QString installCmd;
+    if (!ok) {
+        const QString pkgs = missingPkgs.join(QLatin1Char(' '));
+#ifdef __APPLE__
+        installCmd = QStringLiteral("brew install ") + pkgs;                   // no sudo on mac
+#else
+        if (!QStandardPaths::findExecutable(QStringLiteral("apt")).isEmpty()
+            || !QStandardPaths::findExecutable(QStringLiteral("apt-get")).isEmpty())
+            installCmd = QStringLiteral("sudo apt install -y ") + pkgs;
+        else if (!QStandardPaths::findExecutable(QStringLiteral("dnf")).isEmpty())
+            installCmd = QStringLiteral("sudo dnf install -y ") + pkgs;
+        else if (!QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty())
+            installCmd = QStringLiteral("sudo pacman -S --noconfirm ") + pkgs;
+        else
+            installCmd = QStringLiteral("sudo apt install -y ") + pkgs;        // sensible default
+#endif
+    }
+
+    QJsonObject rootObj;
+    rootObj.insert(QStringLiteral("ok"),         ok);
+    rootObj.insert(QStringLiteral("os"),         os);
+    rootObj.insert(QStringLiteral("items"),      items);
+    rootObj.insert(QStringLiteral("installCmd"), installCmd);
+    setDepsJson(QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Compact)));
 }
 
 void ReceiverUiBackend::onContextReady()
