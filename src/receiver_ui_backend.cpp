@@ -814,7 +814,9 @@ QString ReceiverUiBackend::killTorListeners()
 
     int reaped = 0;
     const QByteArray marker = QByteArrayLiteral("receiver_ui/torlisten-");
-    QDir proc(QStringLiteral("/proc"));   // Linux: scan cmdlines. (macOS has no /proc → own-kill + dir sweep still run.)
+#if defined(__linux__)
+    // Linux: scan /proc cmdlines directly (fast, no subprocess).
+    QDir proc(QStringLiteral("/proc"));
     const auto pids = proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
     for (const QString& pid : pids) {
         bool isNum = false;
@@ -832,6 +834,25 @@ QString ReceiverUiBackend::killTorListeners()
         ::kill(p, SIGKILL);                   // stuck listener → SIGKILL frees the SOCKS port immediately
         ++reaped;
     }
+#elif defined(__APPLE__)
+    // macOS has no /proc → enumerate via `pgrep -f`, then confirm each pid is actually `tor` via `ps -o comm=`
+    // (the comm check is the argv0==tor guard's equivalent — never kill a shell/agent matching the marker).
+    // NOTE: untested on-device (mac build is gated on MACOS-BUILD-PROTOCOL); verify with a physical mac run.
+    QProcess pg;
+    pg.start(QStringLiteral("pgrep"), {QStringLiteral("-f"), QString::fromUtf8(marker)});
+    pg.waitForFinished(3000);
+    for (const QByteArray& line : pg.readAllStandardOutput().split('\n')) {
+        bool ok = false;
+        const int p = line.trimmed().toInt(&ok);
+        if (!ok) continue;
+        QProcess cm;
+        cm.start(QStringLiteral("ps"), {QStringLiteral("-p"), QString::number(p), QStringLiteral("-o"), QStringLiteral("comm=")});
+        cm.waitForFinished(2000);
+        if (!cm.readAllStandardOutput().trimmed().endsWith("tor")) continue;   // only real tor procs
+        ::kill(p, SIGKILL);
+        ++reaped;
+    }
+#endif
 
     int dirs = 0;   // sweep the leaked torlisten-* dirs
     QDir base(QStandardPaths::writableLocation(QStandardPaths::TempLocation) + QStringLiteral("/receiver_ui"));
