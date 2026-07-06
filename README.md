@@ -13,6 +13,42 @@ the delivery client lives in the **ui-host** process. Interops with live `radio-
 
 ---
 
+## Install
+
+### 1. Add the catalog & install the module (in Basecamp)
+
+1. **Settings ▸ Repositories**
+2. **Add a repository** → paste
+   `https://raw.githubusercontent.com/xAlisher/logos-basecamp-modules/main/logos-repo.json`
+   → press **Add**
+3. Go to **Application**, scroll to **xAlisher's Logos Modules**
+4. Press **Receiver_ui**
+5. Press **Install**
+
+> `delivery_module` is pulled in automatically as a dependency.
+
+### 2. Install external runtime dependencies (in a terminal)
+
+`.onion` playback needs **Tor**, **ffmpeg** (`ffplay`), and a SOCKS shim on your `PATH`.
+
+**Linux (Debian/Ubuntu)**
+```bash
+sudo apt install -y tor torsocks ffmpeg
+```
+
+**macOS (arm64)** — uses **privoxy**, not torsocks (torsocks' `LD_PRELOAD` shim is SIP-blocked; `.onion` plays through a privoxy→Tor bridge):
+```bash
+nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy   # or: brew install tor ffmpeg privoxy
+
+# macOS GUI apps get a minimal PATH — point the receiver at the binaries:
+launchctl setenv RECEIVER_TOR_BIN     "$(which tor)"
+launchctl setenv RECEIVER_FFPLAY_BIN  "$(which ffplay)"
+launchctl setenv RECEIVER_PRIVOXY_BIN "$(which privoxy)"
+```
+Then fully quit and relaunch Basecamp so it inherits the new environment.
+
+---
+
 ## 📸 Screenshots
 
 **Receiver** — verified stations render `IP hidden by Tor · <PGP fingerprint>`; pin-by-identity, stop-from-row,
@@ -152,8 +188,8 @@ direct URLs via `ffplay`.
 
 Bundling these inside the `.lgx` isn't fully landing yet — the portable bundler drops extra binaries
 ([logos-module-builder#114](https://github.com/logos-co/logos-module-builder/issues/114)), so on mac the
-helpers are resolved from PATH. Override paths with `RADIO_TOR_BIN` / `RADIO_FFPLAY_BIN` /
-`RADIO_PRIVOXY_BIN` (Linux also: `RADIO_TORSOCKS_BIN`).
+helpers are resolved from PATH. Override paths with `RECEIVER_TOR_BIN` / `RECEIVER_FFPLAY_BIN` /
+`RECEIVER_PRIVOXY_BIN` (Linux also: `RECEIVER_TORSOCKS_BIN`).
 
 ## What it does
 
