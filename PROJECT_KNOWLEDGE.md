@@ -269,3 +269,26 @@ until the 295 issue is resolved.
 `nix build`, verifying `result-lgx-portable/*.lgx` checks the OLD artifact — the symbol/QML looked missing
 though the build was fine. Always `readlink ./result` (or pass `--out-link`) and extract THAT `.lgx` before
 claiming a change shipped. (`strings` also misses Qt `QStringLiteral` — they're UTF-16; use `strings -el`.)
+
+## Dependency-preflight card (retro 2026-07-06, #55)
+Added a first-launch card that detects `tor`/`ffplay` + `torsocks`(Linux)/`privoxy`(mac) via
+`QStandardPaths::findExecutable` (honors `RECEIVER_*_BIN` + absolute-path overrides) and shows a
+copy-able `apt`/`brew` install command + Re-check. Backend: `depsJson` PROP + `checkDeps()` SLOT;
+`publishDeps()` at ctor **and** `onContextReady` (constructor-time PROP set can precede QRO remoting).
+
+- **FAIL — the card didn't render for two rebuild/relaunch cycles.** Root cause: a catalog/lgpd-installed
+  **ui_qml** module lives in `~/.local/share/Logos/LogosBasecamp/plugins/receiver_ui/`, which **shadows**
+  `modules/receiver_ui/`. My dev build was going into `modules/`; the platform kept loading the old
+  `plugins/` copy. The user spotted it ("installed from connected repo — can it be the root cause?").
+  Fix: overwrite `plugins/<name>/`. Wrong action: trusted `dev-install-convention`'s "modules/ is the only
+  runtime dir" (true for core, WRONG for ui_qml) instead of `module-vs-plugin-terminology` which had the
+  correct mapping. Now corrected in the skill. (Confirm which loads: grep the bundled `qml/Main.qml` +
+  `strings` the `.so` for a new symbol.)
+- **FAIL — `pkill -f "logos_host"` kept killing my own shell (exit 144), 3×.** `pkill -f` matches the
+  running command's own cmdline. Kill by numeric PID (`ps -eo pid,comm | awk '/logos-basecamp/'`).
+  → skill `pkill-f-matches-own-shell`.
+- **WIN — a `diag()` dump of the published `depsJson` cleanly split backend-vs-QML.** It proved the backend
+  emitted `ok:false` with the right payload, narrowing the bug to the render/install path (the plugins/ dir),
+  not the detection logic. ui-host stderr is swallowed (#163) so the file-diag trail is the only signal.
+- **WIN — dogfood loop:** removed `ffmpeg`+`torsocks` (both `apt remove` cleanly, no cascade — verify with
+  `apt-get -s remove` first), saw the card, reinstalled, Re-check cleared it live. macOS path untested → #56.
