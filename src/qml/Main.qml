@@ -266,6 +266,41 @@ Item {
     function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy(); clipHelper.text = "" }
     TextEdit { id: clipHelper; visible: false }
 
+    // #57 reusable copy-command box (multi-line) for the dependency card — declared at file root so it
+    // resolves everywhere (nested inline components fail qmllint's resolver / can blank the card).
+    component CmdBox: Rectangle {
+        property string cmd: ""
+        Layout.fillWidth: true
+        implicitHeight: cbRow.implicitHeight + Theme.spacing.small
+        radius: Theme.spacing.radiusSmall
+        color: root.bgPrimary; border.color: root.borderColor; border.width: 1
+        RowLayout {
+            id: cbRow
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                      leftMargin: Theme.spacing.small; rightMargin: Theme.spacing.small }
+            spacing: Theme.spacing.small
+            LogosText {
+                text: cmd
+                font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                color: root.textSecondary
+                Layout.fillWidth: true; wrapMode: Text.WrapAnywhere
+            }
+            Rectangle {
+                id: cbBtn
+                implicitWidth: 20; implicitHeight: 20; color: "transparent"; Layout.alignment: Qt.AlignVCenter
+                opacity: cbArea.containsMouse ? 0.9 : 0.5
+                Behavior on opacity { NumberAnimation { duration: 150 } }
+                Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
+                Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgPrimary; border.color: root.textMuted; border.width: 1; radius: 2 }
+                Timer { id: cbFb; interval: 200; onTriggered: cbBtn.opacity = cbArea.containsMouse ? 0.9 : 0.5 }
+                MouseArea {
+                    id: cbArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: { root.copyText(cmd); cbBtn.opacity = 0.25; cbFb.restart() }
+                }
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Theme.spacing.medium
@@ -351,8 +386,8 @@ Item {
             }
         }
 
-        // ── #55 Dependency preflight — external playback helpers (tor/ffplay + torsocks·privoxy) must be on
-        //    PATH; if any are missing, guide the user with a copy-able install command + Re-check (no auto-install).
+        // ── #55/#57 Dependency preflight — situation-aware: detects present / installed-but-invisible
+        //    (→ exact launchctl line) / missing (→ install cmd for the detected package manager). No auto-run.
         Rectangle {
             Layout.fillWidth: true
             visible: !root.deps.ok
@@ -367,80 +402,69 @@ Item {
                 spacing: Theme.spacing.small
 
                 LogosText {
-                    text: "⚠ Playback needs a few tools installed"
+                    text: "⚠ Playback needs a few tools"
                     color: root.textPrimary
                     font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
-                LogosText {
-                    text: "Receiver streams over Tor, so it relies on a few command-line helpers being on your PATH. "
-                        + "Install the missing ones below, then press Re-check — no restart needed."
-                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
 
-                // per-helper checklist (✓ present / ✗ missing)
+                // per-helper checklist: ✓ present · ⚠ installed-but-invisible · ✗ missing
                 Repeater {
                     model: root.deps.items
                     RowLayout {
                         Layout.fillWidth: true; spacing: Theme.spacing.small
                         LogosText {
-                            text: modelData.present ? "✓" : "✗"
-                            color: modelData.present ? root.ok : Theme.palette.error
+                            text: modelData.state === "present" ? "✓" : modelData.state === "found_offpath" ? "⚠" : "✗"
+                            color: modelData.state === "present" ? root.ok : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
                             font.pixelSize: Theme.typography.primaryText; font.family: root.monoFont
                         }
                         LogosText {
                             text: modelData.name
-                            color: modelData.present ? root.textSecondary : root.textPrimary
+                            color: modelData.state === "present" ? root.textSecondary : root.textPrimary
                             font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
                         }
                         LogosText {
-                            text: modelData.present ? "found" : "missing"
-                            color: modelData.present ? root.textMuted : Theme.palette.error
+                            text: modelData.state === "present" ? "found"
+                                : modelData.state === "found_offpath" ? "installed — not visible to the app"
+                                : "missing"
+                            color: modelData.state === "present" ? root.textMuted
+                                 : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
                             font.pixelSize: Theme.typography.secondaryText
+                            Layout.fillWidth: true; elide: Text.ElideRight
                         }
-                        Item { Layout.fillWidth: true }
                     }
                 }
 
+                // ── Block A: installed but invisible → point Receiver at them (launchctl) ──
                 LogosText {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    text: "Install from a terminal:"
+                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
+                    text: "Some tools are installed but this app can't see them (macOS gives GUI apps a minimal PATH). Run this to point Receiver at them:"
+                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                CmdBox {
+                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
+                    cmd: root.deps.setenvBlock || ""
+                }
+                LogosText {
+                    visible: root.deps.needsRelaunch === true
+                    text: "…then fully quit & relaunch Basecamp (the app reads these at launch), and press Re-check."
                     color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
-                // command box + copy icon — mirrors the Settings reap-command box
-                Rectangle {
+
+                // ── Block B: truly missing → install (command tailored to your package manager) ──
+                LogosText {
                     visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    Layout.fillWidth: true
-                    implicitHeight: depCmdRow.implicitHeight + Theme.spacing.small
-                    radius: Theme.spacing.radiusSmall
-                    color: root.bgPrimary; border.color: root.borderColor; border.width: 1
-                    RowLayout {
-                        id: depCmdRow
-                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
-                                  leftMargin: Theme.spacing.small; rightMargin: Theme.spacing.small }
-                        spacing: Theme.spacing.small
-                        LogosText {
-                            text: root.deps.installCmd
-                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
-                            color: root.textSecondary
-                            Layout.fillWidth: true; elide: Text.ElideRight
-                        }
-                        Rectangle {
-                            id: depCopyBtn
-                            implicitWidth: 20; implicitHeight: 20; color: "transparent"
-                            opacity: depCopyArea.containsMouse ? 0.9 : 0.5
-                            Behavior on opacity { NumberAnimation { duration: 150 } }
-                            Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
-                            Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgPrimary; border.color: root.textMuted; border.width: 1; radius: 2 }
-                            Timer { id: depCopyFb; interval: 200; onTriggered: depCopyBtn.opacity = depCopyArea.containsMouse ? 0.9 : 0.5 }
-                            MouseArea {
-                                id: depCopyArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: { root.copyText(root.deps.installCmd); depCopyBtn.opacity = 0.25; depCopyFb.restart() }
-                            }
-                        }
-                    }
+                    text: root.deps.pkgMgr === "none"
+                          ? "Install the missing tools:"
+                          : "Install the missing tools" + (root.deps.pkgMgr ? " (" + root.deps.pkgMgr + ")" : "") + ":"
+                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                CmdBox {
+                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
+                    cmd: root.deps.installCmd || ""
                 }
 
                 RowLayout {
@@ -449,12 +473,6 @@ Item {
                         text: "Re-check"
                         implicitWidth: 120; implicitHeight: 32
                         onClicked: if (backend) backend.checkDeps()
-                    }
-                    LogosText {
-                        visible: root.deps.os === "macos"
-                        text: "macOS: GUI apps get a minimal PATH — if Re-check still shows missing after installing, see the README to point Receiver at the tools."
-                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                        Layout.fillWidth: true; wrapMode: Text.WordWrap
                     }
                     Item { Layout.fillWidth: true }
                 }
