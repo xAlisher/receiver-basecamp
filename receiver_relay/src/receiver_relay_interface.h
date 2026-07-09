@@ -48,7 +48,8 @@ public:
     Q_INVOKABLE virtual QString getStreamCard() = 0;
 
     // --- Discovery — Epic C/F ---
-    /** delivery_module node status for the header pill. @return {ok, state:"offline"|"ready"|"connected", peerId} */
+    /** delivery_module node status for the header pill. Live relay-connectivity from
+     *  connectionStateChanged. @return {ok, state:"offline"|"starting"|"Connected"|"PartiallyConnected"|"Disconnected", peerId} */
     Q_INVOKABLE virtual QString getDeliveryStatus() = 0;
     /** Subscribe to the well-known directory topic and start collecting heartbeats (#5). @return {ok} */
     Q_INVOKABLE virtual QString startDiscovery() = 0;

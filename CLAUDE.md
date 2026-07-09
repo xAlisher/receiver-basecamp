@@ -1,7 +1,8 @@
 # receiver-basecamp — agent instructions
 
-Read [`README.md`](README.md) first — note the **268-only** caveat (the latest/295 platform hangs
-`getClient`; logos-basecamp#150). Building/testing on macOS? Follow
+Read [`README.md`](README.md) first. **Works on the current `v0.2.0` build** (verified 2026-07-04) — the
+old **268-only** caveat is **stale/resolved**: the v0.2 platform migration fixed the `getClient` hang
+(logos-basecamp#150). Building/testing on macOS? Follow
 [`docs/MACOS-BUILD-PROTOCOL.md`](docs/MACOS-BUILD-PROTOCOL.md) and report in issue #1.
 
 ## Always save the build log

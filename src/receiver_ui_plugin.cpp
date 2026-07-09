@@ -121,6 +121,16 @@ void ReceiverUiPlugin::wireEvents()
             diag(QStringLiteral("onEvent messageReceived: d.size=%1").arg(d.size()));
             for (const QVariant& v : d) ingestAnnounce(v);
         });
+        // Live relay-connectivity for the status pill. delivery_module maps its raw connection_status_change
+        // → the "connectionStateChanged" event with d[0] = "Connected"|"PartiallyConnected"|"Disconnected"
+        // (delivery_module_plugin.cpp). Drive connectionStatus off it so the pill is truthful and can fall
+        // back down — the old code only ever set "initializing"→"connecting" and never saw the real state.
+        m_delivery->onEvent(m_deliveryObj, "connectionStateChanged", [this](const QString&, const QVariantList& d) {
+            if (!d.isEmpty()) {
+                setConnectionStatus(d[0].toString());
+                diag(QStringLiteral("onEvent connectionStateChanged -> %1").arg(d[0].toString()));
+            }
+        });
         diag(QStringLiteral("wireEvents: onEvent subscribed (deferred singleShot 0)"));
     });
     diag(QStringLiteral("wireEvents: requestObject ok, onEvent deferred to next tick"));

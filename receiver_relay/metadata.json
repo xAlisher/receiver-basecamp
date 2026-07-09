@@ -1,6 +1,6 @@
 {
   "name": "receiver_relay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "core",
   "category": "messaging",
   "description": "Receiver discovery+playback relay (core module). Subscribes to delivery_module in logos_host — where cross-module onEvent events DO dispatch (the ui-host doesn't on mac; receiver-basecamp#4) — and exposes the live station list + Tor playback to receiver_ui via callModule.",
