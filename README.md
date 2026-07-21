@@ -133,12 +133,24 @@ nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy     # or:  brew i
 macOS GUI apps get a minimal `PATH` (no `~/.nix-profile/bin` / `/opt/homebrew/bin`), so point the receiver
 at the bins with `launchctl setenv` — **use explicit paths**, not `$(which …)` (it can print a stale/removed
 path, and Homebrew's `privoxy` is in `sbin`). Since v0.2.0.5 the **dependency card prefills these exact lines**
-for you; or set them by hand (Homebrew / Apple Silicon shown) — then relaunch Basecamp:
+for you; or set them by hand (Homebrew / Apple Silicon shown) — then **fully restart** Basecamp:
 ```bash
 launchctl setenv RECEIVER_TOR_BIN     /opt/homebrew/bin/tor
 launchctl setenv RECEIVER_FFPLAY_BIN  /opt/homebrew/bin/ffplay
 launchctl setenv RECEIVER_PRIVOXY_BIN /opt/homebrew/sbin/privoxy
 ```
+**How to fully restart** (the app reads these vars only at launch, so a running instance won't pick them up):
+1. **⌘Q** Basecamp — *closing the window is not enough*. macOS keeps the app (and its helper processes)
+   alive; only ⌘Q / **Basecamp → Quit** actually exits.
+2. **Confirm nothing survived.** macOS has no parent-death signal, so a helper host can linger after quit
+   and the relaunch will re-attach to it (still on the old env). In **Activity Monitor**, search `Logos`
+   and Force-Quit any remaining rows — or in Terminal: `pkill -f LogosBasecamp` (also reap leaked Tor with
+   the in-app **Settings ▸ Kill Tor Listeners**, or `pkill -f torlisten`).
+3. **Reopen** Basecamp from `/Applications` (a fresh launch inherits the `launchctl` vars), then press
+   **Re-check** on the card — the helpers should flip to ✓.
+
+If the card *still* shows "installed — not visible" after a clean restart, a lingering host is the likely
+cause (or a sandbox file-access issue) — see [#58](https://github.com/xAlisher/receiver-basecamp/issues/58).
 
 ### 3. Install delivery_module + the receiver
 `receiver_ui` depends on **`delivery_module`**, which the desktop `.dmg` does **not** bundle — install it

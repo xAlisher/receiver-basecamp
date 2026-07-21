@@ -262,9 +262,10 @@ Item {
 
     Rectangle { anchors.fill: parent; color: root.bgPrimary }
 
-    // clipboard helper — the sandbox has no Clipboard API; TextEdit.copy() is the proven path (radio_ui #12)
-    function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy(); clipHelper.text = "" }
-    TextEdit { id: clipHelper; visible: false }
+    // clipHelper: was visible:false — invisible TextEdits skip document updates, so copy() silently
+    // no-ops on the 2nd+ click. Keep it rendered off-screen so selectAll/copy work every time.
+    function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy() }
+    TextEdit { id: clipHelper; opacity: 0; width: 1; height: 1; clip: true }
 
     // #57 reusable copy-command box (multi-line) for the dependency card — declared at file root so it
     // resolves everywhere (nested inline components fail qmllint's resolver / can blank the card).
@@ -382,99 +383,6 @@ Item {
                     id: gearArea; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.settingsOpen = !root.settingsOpen
-                }
-            }
-        }
-
-        // ── #55/#57 Dependency preflight — situation-aware: detects present / installed-but-invisible
-        //    (→ exact launchctl line) / missing (→ install cmd for the detected package manager). No auto-run.
-        Rectangle {
-            Layout.fillWidth: true
-            visible: !root.deps.ok
-            implicitHeight: depCol.implicitHeight + Theme.spacing.medium * 2
-            radius: Theme.spacing.radiusSmall
-            color: root.bgSecondary; border.color: root.standby; border.width: 1
-
-            ColumnLayout {
-                id: depCol
-                anchors { left: parent.left; right: parent.right; top: parent.top
-                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
-                spacing: Theme.spacing.small
-
-                LogosText {
-                    text: "⚠ Playback needs a few tools"
-                    color: root.textPrimary
-                    font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-
-                // per-helper checklist: ✓ present · ⚠ installed-but-invisible · ✗ missing
-                Repeater {
-                    model: root.deps.items
-                    RowLayout {
-                        Layout.fillWidth: true; spacing: Theme.spacing.small
-                        LogosText {
-                            text: modelData.state === "present" ? "✓" : modelData.state === "found_offpath" ? "⚠" : "✗"
-                            color: modelData.state === "present" ? root.ok : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
-                            font.pixelSize: Theme.typography.primaryText; font.family: root.monoFont
-                        }
-                        LogosText {
-                            text: modelData.name
-                            color: modelData.state === "present" ? root.textSecondary : root.textPrimary
-                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
-                        }
-                        LogosText {
-                            text: modelData.state === "present" ? "found"
-                                : modelData.state === "found_offpath" ? "installed — not visible to the app"
-                                : "missing"
-                            color: modelData.state === "present" ? root.textMuted
-                                 : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
-                            font.pixelSize: Theme.typography.secondaryText
-                            Layout.fillWidth: true; elide: Text.ElideRight
-                        }
-                    }
-                }
-
-                // ── Block A: installed but invisible → point Receiver at them (launchctl) ──
-                LogosText {
-                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
-                    text: "Some tools are installed but this app can't see them (macOS gives GUI apps a minimal PATH). Run this to point Receiver at them:"
-                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-                CmdBox {
-                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
-                    cmd: root.deps.setenvBlock || ""
-                }
-                LogosText {
-                    visible: root.deps.needsRelaunch === true
-                    text: "…then fully quit & relaunch Basecamp (the app reads these at launch), and press Re-check."
-                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-
-                // ── Block B: truly missing → install (command tailored to your package manager) ──
-                LogosText {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    text: root.deps.pkgMgr === "none"
-                          ? "Install the missing tools:"
-                          : "Install the missing tools" + (root.deps.pkgMgr ? " (" + root.deps.pkgMgr + ")" : "") + ":"
-                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-                CmdBox {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    cmd: root.deps.installCmd || ""
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true; spacing: Theme.spacing.small
-                    LogosButton {
-                        text: "Re-check"
-                        implicitWidth: 120; implicitHeight: 32
-                        onClicked: if (backend) backend.checkDeps()
-                    }
-                    Item { Layout.fillWidth: true }
                 }
             }
         }
@@ -1077,6 +985,105 @@ Item {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                     model: root.events
                     delegate: LogosText { text: modelData; color: root.textMuted; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont }
+                }
+            }
+        }
+    }
+
+    // #65 dependency gate — overlay the whole panel while playback tools are missing, so the user
+    // resolves deps before reaching the stations (they read the list and skip an inline card).
+    Rectangle {
+        anchors.fill: parent
+        visible: !root.deps.ok
+        color: Qt.rgba(0, 0, 0, 0.72)                      // scrim dims + gates the stations behind
+        MouseArea { anchors.fill: parent; hoverEnabled: true }   // block clicks reaching the stations
+        Rectangle {
+            id: gateCard
+            anchors.centerIn: parent
+            width: Math.min(parent.width - Theme.spacing.large * 2, 560)
+            implicitHeight: depCol.implicitHeight + Theme.spacing.medium * 2
+            radius: Theme.spacing.radiusSmall
+            color: root.bgSecondary; border.color: root.standby; border.width: 1
+            ColumnLayout {
+                id: depCol
+                anchors { left: parent.left; right: parent.right; top: parent.top
+                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
+                spacing: Theme.spacing.small
+
+                LogosText {
+                    text: "⚠ Playback needs a few tools"
+                    color: root.textPrimary
+                    font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+
+                // per-helper checklist: ✓ present · ⚠ installed-but-invisible · ✗ missing
+                Repeater {
+                    model: root.deps.items
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Theme.spacing.small
+                        LogosText {
+                            text: modelData.state === "present" ? "✓" : modelData.state === "found_offpath" ? "⚠" : "✗"
+                            color: modelData.state === "present" ? root.ok : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
+                            font.pixelSize: Theme.typography.primaryText; font.family: root.monoFont
+                        }
+                        LogosText {
+                            text: modelData.name
+                            color: modelData.state === "present" ? root.textSecondary : root.textPrimary
+                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                        }
+                        LogosText {
+                            text: modelData.state === "present" ? "found"
+                                : modelData.state === "found_offpath" ? "installed — not visible to the app"
+                                : "missing"
+                            color: modelData.state === "present" ? root.textMuted
+                                 : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
+                            font.pixelSize: Theme.typography.secondaryText
+                            Layout.fillWidth: true; elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                // ── Block A: installed but invisible → point Receiver at them (launchctl) ──
+                LogosText {
+                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
+                    text: "Some tools are installed but this app can't see them (macOS gives GUI apps a minimal PATH). Run this to point Receiver at them:"
+                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                CmdBox {
+                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
+                    cmd: root.deps.setenvBlock || ""
+                }
+                LogosText {
+                    visible: root.deps.needsRelaunch === true
+                    text: "…then fully quit Basecamp with ⌘Q (closing the window isn't enough — the app reads these only at launch), reopen it, and press Re-check. If it still shows here after reopening, make sure no old Basecamp/Logos process is still running (Activity Monitor → search “Logos” → Force Quit)."
+                    color: root.textPrimary; font.weight: Theme.typography.weightBold; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+
+                // ── Block B: truly missing → install (command tailored to your package manager) ──
+                LogosText {
+                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
+                    text: root.deps.pkgMgr === "none"
+                          ? "Install the missing tools:"
+                          : "Install the missing tools" + (root.deps.pkgMgr ? " (" + root.deps.pkgMgr + ")" : "") + ":"
+                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                CmdBox {
+                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
+                    cmd: root.deps.installCmd || ""
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.small
+                    LogosButton {
+                        text: "Re-check"
+                        implicitWidth: 120; implicitHeight: 32
+                        onClicked: if (backend) backend.checkDeps()
+                    }
+                    Item { Layout.fillWidth: true }
                 }
             }
         }
