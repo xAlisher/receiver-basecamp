@@ -5,11 +5,12 @@ A lightweight **listen-only** Logos Basecamp module: discover decentralized radi
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
 the delivery client lives in the **ui-host** process. Interops with live `radio-basecamp` hosts.
 
-> **📦 Install:** grab the signed **[v0.2.0.5 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.0.5)**
-> (`receiver_ui-0.2.0.5-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
-> **v0.2.0.5** ships a **`darwin-arm64`** build (macOS, signed) and a **situation-aware dependency card**
-> (#57): it detects present / *installed-but-invisible* (→ the exact `launchctl setenv` line, prefilled) /
-> missing (→ an install command matched to your `brew`/`nix`/`apt`). First-launch preflight (#55) + Re-check.
+> **📦 Install:** grab the signed **[v0.2.0.6 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.0.6)**
+> (`receiver_ui-0.2.0.6-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **v0.2.0.6** redesigns the dependency preflight into a **full-panel overlay gate (#65)**: one **self-healing
+> command** (installs Homebrew if missing → the playback tools → points Receiver at them), a big **Copy commands**
+> button (command also selectable), and an **"I installed dependencies" → fully quit & reopen** flow. The command
+> is zsh-paste-safe. Ships **`darwin-arm64`** (macOS) + **`linux-amd64`**, both signed. First-launch preflight (#55).
 > Universal API (`modules().delivery_module`), no legacy `getClient`. Validated on Basecamp v0.2.0:
 > discovery + connection pill + `.onion` audio.
 
@@ -132,7 +133,7 @@ nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy     # or:  brew i
 ```
 macOS GUI apps get a minimal `PATH` (no `~/.nix-profile/bin` / `/opt/homebrew/bin`), so point the receiver
 at the bins with `launchctl setenv` — **use explicit paths**, not `$(which …)` (it can print a stale/removed
-path, and Homebrew's `privoxy` is in `sbin`). Since v0.2.0.5 the **dependency card prefills these exact lines**
+path, and Homebrew's `privoxy` is in `sbin`). Since v0.2.0.6 the **dependency card gives you one command that installs + wires all of this**
 for you; or set them by hand (Homebrew / Apple Silicon shown) — then **fully restart** Basecamp:
 ```bash
 launchctl setenv RECEIVER_TOR_BIN     /opt/homebrew/bin/tor
@@ -157,8 +158,8 @@ cause (or a sandbox file-access issue) — see [#58](https://github.com/xAlisher
 from the in-app **Package Manager** (delivery_module **0.1.3**). Then install the receiver's darwin `.lgx`:
 ```bash
 PROF="$HOME/Library/Application Support/Logos/LogosBasecamp"
-lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" --allow-unsigned \
-     install --file receiver_ui-0.2.0.5-darwin-arm64.lgx
+lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
+     install --file receiver_ui-0.2.0.6-darwin-arm64.lgx
 printf darwin-arm64 > "$PROF/plugins/receiver_ui/variant"
 ```
 Build that darwin `.lgx` with `nix build .#lgx-portable` on an Apple-Silicon Mac (secp256k1 + tor helpers
@@ -184,12 +185,12 @@ sudo apt install -y tor torsocks ffmpeg
 export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
 PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
-# 3. Install the SIGNED LGX from the v0.2.0.5 release (✓ Signed by xAlisher — no --allow-unsigned).
-curl -fL -o receiver_ui-0.2.0.5-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0.5/receiver_ui-0.2.0.5-linux-amd64.lgx
+# 3. Install the SIGNED LGX from the v0.2.0.6 release (✓ Signed by xAlisher — no --allow-unsigned).
+curl -fL -o receiver_ui-0.2.0.6-linux-amd64.lgx \
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.0.6/receiver_ui-0.2.0.6-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-        install --file receiver_ui-0.2.0.5-linux-amd64.lgx
+        install --file receiver_ui-0.2.0.6-linux-amd64.lgx
 printf 'linux-amd64' > "$PROF/plugins/receiver_ui/variant"   # select the variant
 #   (or build from source instead of downloading: nix build .#lgx-portable — see "Build from source")
 
