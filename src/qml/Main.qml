@@ -264,14 +264,13 @@ Item {
 
     // #65 universal one-command deps fix (macOS) — installs Homebrew if missing, installs the
     // playback tools, and points Receiver at them. Shown in the dependency overlay.
+    // No inline "#" comments or apostrophes here: macOS Terminal is zsh, which (unlike bash) doesn't
+    // treat "#" as a comment interactively, so a comment's apostrophe would open a quote and hang at
+    // "quote>". Double-quotes + $(...) only; the card's description explains what it does.
     readonly property string macFastPath:
-        "# 1. Install Homebrew if you don't have it (it may ask you to continue or for your password — press return / y and type it)\n" +
         "[ -x /opt/homebrew/bin/brew ] || /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n" +
-        "# 2. Make brew available now and in new terminals\n" +
         "eval \"$(/opt/homebrew/bin/brew shellenv)\"\n" +
-        "# 3. Install the playback tools\n" +
         "brew install tor ffmpeg privoxy\n" +
-        "# 4. Point Receiver at them\n" +
         "launchctl setenv RECEIVER_TOR_BIN \"$(brew --prefix)/bin/tor\"\n" +
         "launchctl setenv RECEIVER_FFPLAY_BIN \"$(brew --prefix)/bin/ffplay\"\n" +
         "launchctl setenv RECEIVER_PRIVOXY_BIN \"$(brew --prefix)/sbin/privoxy\""
@@ -283,36 +282,54 @@ Item {
 
     // #57 reusable copy-command box (multi-line) for the dependency card — declared at file root so it
     // resolves everywhere (nested inline components fail qmllint's resolver / can blank the card).
+    // #65 primary CTA — filled orange button (design system ships only an outline LogosButton)
+    component PrimaryBtn: Rectangle {
+        id: pbRoot
+        property alias text: pbLabel.text
+        property bool filled: true          // #65: false = outline (secondary) until promoted to primary
+        signal clicked()
+        implicitHeight: 40
+        implicitWidth: pbLabel.implicitWidth + Theme.spacing.large * 2
+        radius: Theme.spacing.radiusLarge
+        color: !pbRoot.filled ? "transparent"
+             : (pbArea.pressed ? Qt.darker(root.accent, 1.35)
+             : (pbArea.containsMouse ? Qt.darker(root.accent, 1.15) : root.accent))
+        border.width: pbRoot.filled ? 0 : 1
+        border.color: root.accent
+        Behavior on color { ColorAnimation { duration: 120 } }
+        LogosText {
+            id: pbLabel
+            anchors.centerIn: parent
+            color: pbRoot.filled ? "#FFFFFF" : root.accent
+            font.pixelSize: Theme.typography.secondaryText
+            font.weight: Theme.typography.weightBold
+        }
+        MouseArea {
+            id: pbArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: pbRoot.clicked()
+        }
+    }
+
+    // #65 copy box — the command(s) with a big, obvious primary "Copy commands" button beneath
     component CmdBox: Rectangle {
         property string cmd: ""
         Layout.fillWidth: true
-        implicitHeight: cbRow.implicitHeight + Theme.spacing.small
+        implicitHeight: cbText.implicitHeight + Theme.spacing.medium
         radius: Theme.spacing.radiusSmall
         color: root.bgPrimary; border.color: root.borderColor; border.width: 1
-        RowLayout {
-            id: cbRow
+        TextEdit {                                       // read-only but selectable — drag-select + ⌘C if the button is missed
+            id: cbText
             anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
                       leftMargin: Theme.spacing.small; rightMargin: Theme.spacing.small }
-            spacing: Theme.spacing.small
-            LogosText {
-                text: cmd
-                font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
-                color: root.textSecondary
-                Layout.fillWidth: true; wrapMode: Text.WrapAnywhere
-            }
-            Rectangle {
-                id: cbBtn
-                implicitWidth: 20; implicitHeight: 20; color: "transparent"; Layout.alignment: Qt.AlignVCenter
-                opacity: cbArea.containsMouse ? 0.9 : 0.5
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-                Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
-                Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgPrimary; border.color: root.textMuted; border.width: 1; radius: 2 }
-                Timer { id: cbFb; interval: 200; onTriggered: cbBtn.opacity = cbArea.containsMouse ? 0.9 : 0.5 }
-                MouseArea {
-                    id: cbArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: { root.copyText(cmd); cbBtn.opacity = 0.25; cbFb.restart() }
-                }
-            }
+            text: cmd
+            readOnly: true
+            selectByMouse: true
+            persistentSelection: true
+            wrapMode: TextEdit.WrapAnywhere
+            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+            color: root.textSecondary
+            selectionColor: root.accent
+            selectedTextColor: "#FFFFFF"
         }
     }
 
@@ -1013,6 +1030,7 @@ Item {
         MouseArea { anchors.fill: parent; hoverEnabled: true }   // block clicks reaching the stations
         Rectangle {
             id: gateCard
+            z: 1                                           // sit above the scrim's click-blocker so the card's buttons receive clicks
             anchors.centerIn: parent
             width: Math.min(parent.width - Theme.spacing.large * 2, 560)
             implicitHeight: depCol.implicitHeight + Theme.spacing.medium * 2
@@ -1024,8 +1042,11 @@ Item {
                           leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
                 spacing: Theme.spacing.small
                 property bool installedClicked: false   // #65: flips to the restart message after the user clicks the button
+                property bool copied: false             // #65: flips true once the command is copied → promotes the "I installed" button
+                property string depCmd: Qt.platform.os === "osx" ? root.macFastPath : (root.deps.installCmd || root.deps.setenvBlock || "")
 
                 LogosText {
+                    visible: !depCol.installedClicked
                     text: "⚠ Playback needs a few tools"
                     color: root.textPrimary
                     font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
@@ -1036,6 +1057,7 @@ Item {
                 Repeater {
                     model: root.deps.items
                     RowLayout {
+                        visible: !depCol.installedClicked
                         Layout.fillWidth: true; spacing: Theme.spacing.small
                         LogosText {
                             text: modelData.state === "present" ? "✓" : modelData.state === "found_offpath" ? "⚠" : "✗"
@@ -1065,18 +1087,26 @@ Item {
                     text: Qt.platform.os === "osx"
                           ? "Open Terminal and paste this. It installs Homebrew if you don't have it, installs the playback tools, and points Receiver at them. The terminal may ask you to continue or for your password — press return / y and type your password when asked."
                           : "Open a terminal and run this to install the playback tools:"
-                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
+                    color: root.textPrimary; font.pixelSize: Theme.typography.secondaryText
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
                 CmdBox {
                     visible: !depCol.installedClicked
-                    cmd: Qt.platform.os === "osx" ? root.macFastPath : (root.deps.installCmd || root.deps.setenvBlock || "")
+                    cmd: depCol.depCmd
                 }
-                LogosButton {
+                RowLayout {
                     visible: !depCol.installedClicked
-                    text: "I installed dependencies"
-                    implicitHeight: 32
-                    onClicked: depCol.installedClicked = true
+                    Layout.fillWidth: true; spacing: Theme.spacing.small
+                    PrimaryBtn {                                  // Copy — left, primary from the start
+                        text: depCol.copied ? "Copied!  Copy again?" : "Copy commands"
+                        onClicked: { root.copyText(depCol.depCmd); depCol.copied = true }
+                    }
+                    Item { Layout.fillWidth: true }
+                    PrimaryBtn {                                  // I installed — right, outline until the command is copied
+                        filled: depCol.copied
+                        text: "I installed dependencies"
+                        onClicked: depCol.installedClicked = true
+                    }
                 }
 
                 // ── STEP 2 (after the button): restart instructions ──
@@ -1084,20 +1114,10 @@ Item {
                     visible: depCol.installedClicked
                     text: Qt.platform.os === "osx"
                           ? "✓ Almost there — now fully quit Basecamp (⌘Q — closing the window isn't enough), reopen it, and open Receiver again."
-                          : "✓ Almost there — press Re-check below."
+                          : "✓ Almost there — fully quit Basecamp, reopen it, and open Receiver again."
                     color: root.textPrimary; font.weight: Theme.typography.weightBold
                     font.pixelSize: Theme.typography.primaryText
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-                RowLayout {
-                    visible: depCol.installedClicked
-                    Layout.fillWidth: true; spacing: Theme.spacing.small
-                    LogosButton {
-                        text: "Re-check"
-                        implicitWidth: 120; implicitHeight: 32
-                        onClicked: { depCol.installedClicked = false; if (backend) backend.checkDeps() }
-                    }
-                    Item { Layout.fillWidth: true }
                 }
             }
         }
