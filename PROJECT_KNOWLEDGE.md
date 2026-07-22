@@ -292,3 +292,35 @@ copy-able `apt`/`brew` install command + Re-check. Backend: `depsJson` PROP + `c
   not the detection logic. ui-host stderr is swallowed (#163) so the file-diag trail is the only signal.
 - **WIN — dogfood loop:** removed `ffmpeg`+`torsocks` (both `apt remove` cleanly, no cascade — verify with
   `apt-get -s remove` first), saw the card, reinstalled, Re-check cleared it live. macOS path untested → #56.
+
+## #65 dependency-OVERLAY gate + v0.2.6 SemVer re-cut (retro 2026-07-22)
+Redesigned the #55 preflight card into a **full-panel overlay gate** (scrim + centered `gateCard`, `z:1` so
+its buttons sit above the scrim's click-blocking MouseArea) so users can't skip it and reach the stations.
+One **self-healing command** (`macFastPath`: install Homebrew if missing → tor/ffmpeg/privoxy → `launchctl setenv`),
+a filled-orange **Copy commands** button, then an **"I installed dependencies" → fully quit & reopen** flow.
+Shipped as **v0.2.6** (both platforms, signed). Iterated the QML entirely by hot-swap (no `.lgx` rebuild per
+tweak) → skill `qml-hot-swap-installed-plugin`.
+
+- **Design system ships only an OUTLINE `LogosButton`.** For a filled/primary CTA, roll your own Rectangle
+  (`Theme.palette.primary` = orange300; `Qt.darker(accent,1.15/1.35)` for hover/press — theme-safe, no reliance
+  on `primaryHover`/`primaryPressed` existing in both themes) with a `property bool filled` for outline↔filled.
+- **FAIL — the "I installed" button appeared dead.** First-guess was the scrim MouseArea eating clicks (added
+  `z:1` defensively). Real cause was downstream (a stale deploy, below) — but the `z:1` on the centered card
+  above a full-panel click-blocker is correct and worth keeping. Lesson: for an overlay, give the card explicit z.
+- **FAIL — deployed a STALE `Main.qml` for a whole round-trip.** In an `ssh '…'` (single-quoted) heredoc, a
+  **local** `$INST` var didn't expand on the remote → `cp` wrote to `$HOME/` instead of the plugin path; the
+  install looked done but ran old code ("button doesn't work"). Root cause: mixed local/remote var expansion in
+  an ssh one-liner. Fix: define remote paths ON the remote (`DEST="$HOME/…"` inside the heredoc) and **always
+  `md5` the deployed file == source**. → `qml-hot-swap-installed-plugin`.
+- **FAIL — the card's command hung the user's Terminal at `quote>`.** The command had `#` comment lines and
+  `# … don't …` apostrophes; macOS zsh (interactive_comments OFF) read the `'` as an open quote. Fix: comment/
+  apostrophe-free command, explanation in the description text; command also made selectable (read-only
+  `TextEdit`). → skill `qml-copy-command-zsh-safe`.
+- **FAIL — shipped v0.2.0.6 (4-part), built+signed BOTH platforms, then the catalog rejected it.** The catalog
+  CI's `lgx verify` enforces SemVer 2.0.0; 4-part is invalid AND the stale 4-part `0.2.0.5` poisoned the whole
+  index rebuild until unpublished. Re-cut → **0.2.6**. The receiver `0.2.0.x` scheme is dead; use 3-part SemVer,
+  encode BC-compat via `+basecampX.Y.Z` (dlipicar confirmed). → skill `module-version-convention` (flipped),
+  `/release` skill gained a §0 SemVer gate.
+- **WIN — stopped at the SemVer wall and got the version-scheme decision from Alisher** instead of unilaterally
+  re-versioning or hacking the shared catalog CI. The `module-version-convention` skill's own pre-written Caveat
+  had predicted this exact failure and named the fix (`0.2.<n>`).
