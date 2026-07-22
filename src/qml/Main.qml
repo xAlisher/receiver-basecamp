@@ -262,42 +262,74 @@ Item {
 
     Rectangle { anchors.fill: parent; color: root.bgPrimary }
 
-    // clipboard helper — the sandbox has no Clipboard API; TextEdit.copy() is the proven path (radio_ui #12)
-    function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy(); clipHelper.text = "" }
-    TextEdit { id: clipHelper; visible: false }
+    // #65 universal one-command deps fix (macOS) — installs Homebrew if missing, installs the
+    // playback tools, and points Receiver at them. Shown in the dependency overlay.
+    // No inline "#" comments or apostrophes here: macOS Terminal is zsh, which (unlike bash) doesn't
+    // treat "#" as a comment interactively, so a comment's apostrophe would open a quote and hang at
+    // "quote>". Double-quotes + $(...) only; the card's description explains what it does.
+    readonly property string macFastPath:
+        "[ -x /opt/homebrew/bin/brew ] || /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n" +
+        "eval \"$(/opt/homebrew/bin/brew shellenv)\"\n" +
+        "brew install tor ffmpeg privoxy\n" +
+        "launchctl setenv RECEIVER_TOR_BIN \"$(brew --prefix)/bin/tor\"\n" +
+        "launchctl setenv RECEIVER_FFPLAY_BIN \"$(brew --prefix)/bin/ffplay\"\n" +
+        "launchctl setenv RECEIVER_PRIVOXY_BIN \"$(brew --prefix)/sbin/privoxy\""
+
+    // clipHelper: was visible:false — invisible TextEdits skip document updates, so copy() silently
+    // no-ops on the 2nd+ click. Keep it rendered off-screen so selectAll/copy work every time.
+    function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy() }
+    TextEdit { id: clipHelper; opacity: 0; width: 1; height: 1; clip: true }
 
     // #57 reusable copy-command box (multi-line) for the dependency card — declared at file root so it
     // resolves everywhere (nested inline components fail qmllint's resolver / can blank the card).
+    // #65 primary CTA — filled orange button (design system ships only an outline LogosButton)
+    component PrimaryBtn: Rectangle {
+        id: pbRoot
+        property alias text: pbLabel.text
+        property bool filled: true          // #65: false = outline (secondary) until promoted to primary
+        signal clicked()
+        implicitHeight: 40
+        implicitWidth: pbLabel.implicitWidth + Theme.spacing.large * 2
+        radius: Theme.spacing.radiusLarge
+        color: !pbRoot.filled ? "transparent"
+             : (pbArea.pressed ? Qt.darker(root.accent, 1.35)
+             : (pbArea.containsMouse ? Qt.darker(root.accent, 1.15) : root.accent))
+        border.width: pbRoot.filled ? 0 : 1
+        border.color: root.accent
+        Behavior on color { ColorAnimation { duration: 120 } }
+        LogosText {
+            id: pbLabel
+            anchors.centerIn: parent
+            color: pbRoot.filled ? "#FFFFFF" : root.accent
+            font.pixelSize: Theme.typography.secondaryText
+            font.weight: Theme.typography.weightBold
+        }
+        MouseArea {
+            id: pbArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: pbRoot.clicked()
+        }
+    }
+
+    // #65 copy box — the command(s) with a big, obvious primary "Copy commands" button beneath
     component CmdBox: Rectangle {
         property string cmd: ""
         Layout.fillWidth: true
-        implicitHeight: cbRow.implicitHeight + Theme.spacing.small
+        implicitHeight: cbText.implicitHeight + Theme.spacing.medium
         radius: Theme.spacing.radiusSmall
         color: root.bgPrimary; border.color: root.borderColor; border.width: 1
-        RowLayout {
-            id: cbRow
+        TextEdit {                                       // read-only but selectable — drag-select + ⌘C if the button is missed
+            id: cbText
             anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
                       leftMargin: Theme.spacing.small; rightMargin: Theme.spacing.small }
-            spacing: Theme.spacing.small
-            LogosText {
-                text: cmd
-                font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
-                color: root.textSecondary
-                Layout.fillWidth: true; wrapMode: Text.WrapAnywhere
-            }
-            Rectangle {
-                id: cbBtn
-                implicitWidth: 20; implicitHeight: 20; color: "transparent"; Layout.alignment: Qt.AlignVCenter
-                opacity: cbArea.containsMouse ? 0.9 : 0.5
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-                Rectangle { x: 3; y: 6; width: 10; height: 10; color: "transparent"; border.color: root.textMuted; border.width: 1; radius: 2 }
-                Rectangle { x: 6; y: 3; width: 10; height: 10; color: root.bgPrimary; border.color: root.textMuted; border.width: 1; radius: 2 }
-                Timer { id: cbFb; interval: 200; onTriggered: cbBtn.opacity = cbArea.containsMouse ? 0.9 : 0.5 }
-                MouseArea {
-                    id: cbArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: { root.copyText(cmd); cbBtn.opacity = 0.25; cbFb.restart() }
-                }
-            }
+            text: cmd
+            readOnly: true
+            selectByMouse: true
+            persistentSelection: true
+            wrapMode: TextEdit.WrapAnywhere
+            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+            color: root.textSecondary
+            selectionColor: root.accent
+            selectedTextColor: "#FFFFFF"
         }
     }
 
@@ -382,99 +414,6 @@ Item {
                     id: gearArea; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.settingsOpen = !root.settingsOpen
-                }
-            }
-        }
-
-        // ── #55/#57 Dependency preflight — situation-aware: detects present / installed-but-invisible
-        //    (→ exact launchctl line) / missing (→ install cmd for the detected package manager). No auto-run.
-        Rectangle {
-            Layout.fillWidth: true
-            visible: !root.deps.ok
-            implicitHeight: depCol.implicitHeight + Theme.spacing.medium * 2
-            radius: Theme.spacing.radiusSmall
-            color: root.bgSecondary; border.color: root.standby; border.width: 1
-
-            ColumnLayout {
-                id: depCol
-                anchors { left: parent.left; right: parent.right; top: parent.top
-                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
-                spacing: Theme.spacing.small
-
-                LogosText {
-                    text: "⚠ Playback needs a few tools"
-                    color: root.textPrimary
-                    font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-
-                // per-helper checklist: ✓ present · ⚠ installed-but-invisible · ✗ missing
-                Repeater {
-                    model: root.deps.items
-                    RowLayout {
-                        Layout.fillWidth: true; spacing: Theme.spacing.small
-                        LogosText {
-                            text: modelData.state === "present" ? "✓" : modelData.state === "found_offpath" ? "⚠" : "✗"
-                            color: modelData.state === "present" ? root.ok : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
-                            font.pixelSize: Theme.typography.primaryText; font.family: root.monoFont
-                        }
-                        LogosText {
-                            text: modelData.name
-                            color: modelData.state === "present" ? root.textSecondary : root.textPrimary
-                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
-                        }
-                        LogosText {
-                            text: modelData.state === "present" ? "found"
-                                : modelData.state === "found_offpath" ? "installed — not visible to the app"
-                                : "missing"
-                            color: modelData.state === "present" ? root.textMuted
-                                 : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
-                            font.pixelSize: Theme.typography.secondaryText
-                            Layout.fillWidth: true; elide: Text.ElideRight
-                        }
-                    }
-                }
-
-                // ── Block A: installed but invisible → point Receiver at them (launchctl) ──
-                LogosText {
-                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
-                    text: "Some tools are installed but this app can't see them (macOS gives GUI apps a minimal PATH). Run this to point Receiver at them:"
-                    color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-                CmdBox {
-                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
-                    cmd: root.deps.setenvBlock || ""
-                }
-                LogosText {
-                    visible: root.deps.needsRelaunch === true
-                    text: "…then fully quit & relaunch Basecamp (the app reads these at launch), and press Re-check."
-                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-
-                // ── Block B: truly missing → install (command tailored to your package manager) ──
-                LogosText {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    text: root.deps.pkgMgr === "none"
-                          ? "Install the missing tools:"
-                          : "Install the missing tools" + (root.deps.pkgMgr ? " (" + root.deps.pkgMgr + ")" : "") + ":"
-                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-                CmdBox {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    cmd: root.deps.installCmd || ""
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true; spacing: Theme.spacing.small
-                    LogosButton {
-                        text: "Re-check"
-                        implicitWidth: 120; implicitHeight: 32
-                        onClicked: if (backend) backend.checkDeps()
-                    }
-                    Item { Layout.fillWidth: true }
                 }
             }
         }
@@ -1077,6 +1016,108 @@ Item {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                     model: root.events
                     delegate: LogosText { text: modelData; color: root.textMuted; font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont }
+                }
+            }
+        }
+    }
+
+    // #65 dependency gate — overlay the whole panel while playback tools are missing, so the user
+    // resolves deps before reaching the stations (they read the list and skip an inline card).
+    Rectangle {
+        anchors.fill: parent
+        visible: !root.deps.ok
+        color: Qt.rgba(0, 0, 0, 0.72)                      // scrim dims + gates the stations behind
+        MouseArea { anchors.fill: parent; hoverEnabled: true }   // block clicks reaching the stations
+        Rectangle {
+            id: gateCard
+            z: 1                                           // sit above the scrim's click-blocker so the card's buttons receive clicks
+            anchors.centerIn: parent
+            width: Math.min(parent.width - Theme.spacing.large * 2, 560)
+            implicitHeight: depCol.implicitHeight + Theme.spacing.medium * 2
+            radius: Theme.spacing.radiusSmall
+            color: root.bgSecondary; border.color: root.standby; border.width: 1
+            ColumnLayout {
+                id: depCol
+                anchors { left: parent.left; right: parent.right; top: parent.top
+                          leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
+                spacing: Theme.spacing.small
+                property bool installedClicked: false   // #65: flips to the restart message after the user clicks the button
+                property bool copied: false             // #65: flips true once the command is copied → promotes the "I installed" button
+                property string depCmd: Qt.platform.os === "osx" ? root.macFastPath : (root.deps.installCmd || root.deps.setenvBlock || "")
+
+                LogosText {
+                    visible: !depCol.installedClicked
+                    text: "⚠ Playback needs a few tools"
+                    color: root.textPrimary
+                    font.pixelSize: Theme.typography.primaryText; font.weight: Theme.typography.weightBold
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+
+                // per-helper checklist: ✓ present · ⚠ installed-but-invisible · ✗ missing
+                Repeater {
+                    model: root.deps.items
+                    RowLayout {
+                        visible: !depCol.installedClicked
+                        Layout.fillWidth: true; spacing: Theme.spacing.small
+                        LogosText {
+                            text: modelData.state === "present" ? "✓" : modelData.state === "found_offpath" ? "⚠" : "✗"
+                            color: modelData.state === "present" ? root.ok : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
+                            font.pixelSize: Theme.typography.primaryText; font.family: root.monoFont
+                        }
+                        LogosText {
+                            text: modelData.name
+                            color: modelData.state === "present" ? root.textSecondary : root.textPrimary
+                            font.pixelSize: Theme.typography.secondaryText; font.family: root.monoFont
+                        }
+                        LogosText {
+                            text: modelData.state === "present" ? "found"
+                                : modelData.state === "found_offpath" ? "installed — not visible to the app"
+                                : "missing"
+                            color: modelData.state === "present" ? root.textMuted
+                                 : modelData.state === "found_offpath" ? root.standby : Theme.palette.error
+                            font.pixelSize: Theme.typography.secondaryText
+                            Layout.fillWidth: true; elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                // ── STEP 1 (default): the single universal command ──
+                LogosText {
+                    visible: !depCol.installedClicked
+                    text: Qt.platform.os === "osx"
+                          ? "Open Terminal and paste this. It installs Homebrew if you don't have it, installs the playback tools, and points Receiver at them. The terminal may ask you to continue or for your password — press return / y and type your password when asked."
+                          : "Open a terminal and run this to install the playback tools:"
+                    color: root.textPrimary; font.pixelSize: Theme.typography.secondaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                CmdBox {
+                    visible: !depCol.installedClicked
+                    cmd: depCol.depCmd
+                }
+                RowLayout {
+                    visible: !depCol.installedClicked
+                    Layout.fillWidth: true; spacing: Theme.spacing.small
+                    PrimaryBtn {                                  // Copy — left, primary from the start
+                        text: depCol.copied ? "Copied!  Copy again?" : "Copy commands"
+                        onClicked: { root.copyText(depCol.depCmd); depCol.copied = true }
+                    }
+                    Item { Layout.fillWidth: true }
+                    PrimaryBtn {                                  // I installed — right, outline until the command is copied
+                        filled: depCol.copied
+                        text: "I installed dependencies"
+                        onClicked: depCol.installedClicked = true
+                    }
+                }
+
+                // ── STEP 2 (after the button): restart instructions ──
+                LogosText {
+                    visible: depCol.installedClicked
+                    text: Qt.platform.os === "osx"
+                          ? "✓ Almost there — now fully quit Basecamp (⌘Q — closing the window isn't enough), reopen it, and open Receiver again."
+                          : "✓ Almost there — fully quit Basecamp, reopen it, and open Receiver again."
+                    color: root.textPrimary; font.weight: Theme.typography.weightBold
+                    font.pixelSize: Theme.typography.primaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
             }
         }
