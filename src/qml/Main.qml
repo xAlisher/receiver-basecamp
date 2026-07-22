@@ -262,6 +262,20 @@ Item {
 
     Rectangle { anchors.fill: parent; color: root.bgPrimary }
 
+    // #65 universal one-command deps fix (macOS) — installs Homebrew if missing, installs the
+    // playback tools, and points Receiver at them. Shown in the dependency overlay.
+    readonly property string macFastPath:
+        "# 1. Install Homebrew if you don't have it (it may ask you to continue or for your password — press return / y and type it)\n" +
+        "[ -x /opt/homebrew/bin/brew ] || /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n" +
+        "# 2. Make brew available now and in new terminals\n" +
+        "eval \"$(/opt/homebrew/bin/brew shellenv)\"\n" +
+        "# 3. Install the playback tools\n" +
+        "brew install tor ffmpeg privoxy\n" +
+        "# 4. Point Receiver at them\n" +
+        "launchctl setenv RECEIVER_TOR_BIN \"$(brew --prefix)/bin/tor\"\n" +
+        "launchctl setenv RECEIVER_FFPLAY_BIN \"$(brew --prefix)/bin/ffplay\"\n" +
+        "launchctl setenv RECEIVER_PRIVOXY_BIN \"$(brew --prefix)/sbin/privoxy\""
+
     // clipHelper: was visible:false — invisible TextEdits skip document updates, so copy() silently
     // no-ops on the 2nd+ click. Keep it rendered off-screen so selectAll/copy work every time.
     function copyText(t) { clipHelper.text = t; clipHelper.selectAll(); clipHelper.copy() }
@@ -1009,6 +1023,7 @@ Item {
                 anchors { left: parent.left; right: parent.right; top: parent.top
                           leftMargin: Theme.spacing.medium; rightMargin: Theme.spacing.medium; topMargin: Theme.spacing.medium }
                 spacing: Theme.spacing.small
+                property bool installedClicked: false   // #65: flips to the restart message after the user clicks the button
 
                 LogosText {
                     text: "⚠ Playback needs a few tools"
@@ -1044,44 +1059,43 @@ Item {
                     }
                 }
 
-                // ── Block A: installed but invisible → point Receiver at them (launchctl) ──
+                // ── STEP 1 (default): the single universal command ──
                 LogosText {
-                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
-                    text: "Some tools are installed but this app can't see them (macOS gives GUI apps a minimal PATH). Run this to point Receiver at them:"
+                    visible: !depCol.installedClicked
+                    text: Qt.platform.os === "osx"
+                          ? "Open Terminal and paste this. It installs Homebrew if you don't have it, installs the playback tools, and points Receiver at them. The terminal may ask you to continue or for your password — press return / y and type your password when asked."
+                          : "Open a terminal and run this to install the playback tools:"
                     color: root.textSecondary; font.pixelSize: Theme.typography.secondaryText
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
                 CmdBox {
-                    visible: root.deps.setenvBlock && root.deps.setenvBlock.length > 0
-                    cmd: root.deps.setenvBlock || ""
+                    visible: !depCol.installedClicked
+                    cmd: Qt.platform.os === "osx" ? root.macFastPath : (root.deps.installCmd || root.deps.setenvBlock || "")
                 }
-                LogosText {
-                    visible: root.deps.needsRelaunch === true
-                    text: "…then fully quit Basecamp with ⌘Q (closing the window isn't enough — the app reads these only at launch), reopen it, and press Re-check. If it still shows here after reopening, make sure no old Basecamp/Logos process is still running (Activity Monitor → search “Logos” → Force Quit)."
-                    color: root.textPrimary; font.weight: Theme.typography.weightBold; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-
-                // ── Block B: truly missing → install (command tailored to your package manager) ──
-                LogosText {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    text: root.deps.pkgMgr === "none"
-                          ? "Install the missing tools:"
-                          : "Install the missing tools" + (root.deps.pkgMgr ? " (" + root.deps.pkgMgr + ")" : "") + ":"
-                    color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                }
-                CmdBox {
-                    visible: root.deps.installCmd && root.deps.installCmd.length > 0
-                    cmd: root.deps.installCmd || ""
+                LogosButton {
+                    visible: !depCol.installedClicked
+                    text: "I installed dependencies"
+                    implicitHeight: 32
+                    onClicked: depCol.installedClicked = true
                 }
 
+                // ── STEP 2 (after the button): restart instructions ──
+                LogosText {
+                    visible: depCol.installedClicked
+                    text: Qt.platform.os === "osx"
+                          ? "✓ Almost there — now fully quit Basecamp (⌘Q — closing the window isn't enough), reopen it, and open Receiver again."
+                          : "✓ Almost there — press Re-check below."
+                    color: root.textPrimary; font.weight: Theme.typography.weightBold
+                    font.pixelSize: Theme.typography.primaryText
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
                 RowLayout {
+                    visible: depCol.installedClicked
                     Layout.fillWidth: true; spacing: Theme.spacing.small
                     LogosButton {
                         text: "Re-check"
                         implicitWidth: 120; implicitHeight: 32
-                        onClicked: if (backend) backend.checkDeps()
+                        onClicked: { depCol.installedClicked = false; if (backend) backend.checkDeps() }
                     }
                     Item { Layout.fillWidth: true }
                 }
