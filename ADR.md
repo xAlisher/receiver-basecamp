@@ -210,3 +210,27 @@ an actionable prompt.
 **Known limitation:** macOS GUI apps get a minimal PATH, so `launchctl setenv` is sometimes needed
 for the card to see installed tools — an open friction point (#58/#59). Portable `.lgx` uses
 `$ORIGIN` rpath so dlopen stays under the 2 s token-handshake timeout.
+
+---
+
+## ADR-10: A "private" station is obscurity today, real confidentiality is the target (listener side)
+
+**Decision:** Receiver subscribes to the public directory topic plus **user-supplied private
+topics** (F1.1). Today a "private" station is protected only by an **unguessable topic string** —
+the listener still ingests an **unencrypted** announce.
+
+**Privacy is obscurity, not confidentiality** (mirror of Booth ADR-3, flagged in review by
+@vpavlin, 2026-07-28): knowing the topic is enough to listen, and a **relay node** subscribed to
+the shard already sees every `/radio-basecamp/1/*` contentTopic and can read the unencrypted
+payload — so the listener's "private" topic buys nothing against anyone relaying the network. It
+only keeps a station out of the *public directory* listing.
+
+**Target model** (adopted, not yet built — **receiver#69** / booth#66): the listener derives the
+same secret-topic and decrypts, symmetric to the broadcaster —
+`topic = /radio-basecamp/1/hash(Title+Pass)/json`, then `payload = decrypt(payload, Pass)` using the
+user-entered `Title+Pass`. Until then Receiver can *reach* an obscure-topic station but cannot offer
+real confidentiality; the current build ships the weaker obscure-topic form (no payload decryption).
+
+**Known limitation:** No revocation — anyone who learns the topic (public path) or `Title+Pass`
+(target private path) can listen indefinitely. Verification (ADR-5) is orthogonal: a signature
+proves *who* broadcast, not that the stream is *confidential*.
