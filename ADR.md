@@ -10,23 +10,29 @@
 
 ---
 
-## ADR-1: Consume `delivery_module` from a `ui_qml` C++ backend, not a `type:core` sidecar
+## ADR-1: Receiver is a single `ui_qml` module consuming `delivery_module` directly (relay split retired)
 
 **Decision:** Receiver is a single `ui_qml` module whose C++ backend consumes `delivery_module`
 for discovery and runs playback as a subprocess — `type: ui_qml`, `dependencies:
 ["delivery_module"]`.
 
-**Alternatives considered:** The tutorial "core module + QML UI" split (the shape used by the
-broadcaster). Rejected because a `type: core` module runs in its own `logos_host` sidecar that
-never receives the `capability_module` bootstrap token, so consuming `delivery_module` from a core
-sidecar **crashes at load** (`std::length_error` in `LogosAPI::getClient`) on every recent build.
+**Alternatives considered:** A **relay split** — a `type:core` `receiver_relay` that consumes
+delivery in `logos_host` plus a pure-QML UI polling it over `logos.callModule`. We actually built
+it. A core module consuming delivery does **not** crash: `receiver_relay` received `messageReceived`
+**7/7** on macOS (`research/delivery-on-mac/journal.md`). We **retired** it — not because core fails,
+but because its reason to exist evaporated: the "ui-host can't receive cross-module delivery events
+on mac" verdict that motivated the split turned out to be a **stale host cpp-sdk (< #68) confound**,
+since retracted, and once the sync-IPC deadlock was solved in-module (ADR-2), a single `ui_qml`
+artifact is simpler than a two-module relay + `callModule` polling. (A separate pre-v0.2
+`getClient` hang, #150, once pinned builds — but it hit the `ui_qml` path too and is resolved.)
 
-**Rationale:** Code in the **ui-host** process *does* get the bootstrap token. Building Receiver
-as a ui_qml module with a C++ backend is what lets it consume delivery on the latest platform —
-and ship on macOS/arm, where the core-sidecar broadcaster cannot.
+**Rationale:** One module, one process, one artifact — no cross-module `callModule` round-trips, no
+second `.lgx` to ship and version. The direct `ui_qml` C++ backend consumes delivery end-to-end on
+the current platform (Linux + macOS/arm64) with the deadlock handled in-module.
 
 **Known limitation:** The C++ backend, the delivery client, and the `ffplay` subprocess all share
-the single-threaded ui-host event loop — which sets up the deadlock ADR-2 had to solve.
+the single-threaded ui-host event loop — the deadlock ADR-2 had to solve. The superseded
+`receiver_relay` sources still sit in-tree (tracked for removal — receiver#70).
 
 ---
 
@@ -151,7 +157,10 @@ rejected once that verdict proved to be a confound (a stale host SDK); the unive
 (ADR-2) collapsed the relay into a single QtRO-backed `receiver_ui`.
 
 **Rationale:** One backend process owns the event stream and the subprocess; QML stays a thin,
-compile-free view.
+compile-free view. This is the platform-standard `ui_qml` bridge, **not** a Receiver invention — it
+is recorded here only because the two alternatives above (pure-QML `callModule`, the relay split)
+were live options for *this* app and needed explicit ruling out, not as general guidance on how
+Logos core should be used.
 
 **Known limitation:** The superseded relay sources and an old `Main.qml` still ship in-tree — a
 "which one ships" footgun to prune.

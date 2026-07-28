@@ -12,20 +12,19 @@
 ### F1. Discover stations over Logos Messaging
 - **F1.1**: Subscribe to the public directory topic `/radio-basecamp/1/directory/json` and user-supplied private topics.
 - **F1.2**: Ingest JSON station announces broadcast by Booth/radio hosts.
-- **F1.3**: Prune dead stations by heartbeat TTL (~45 s).
+- **F1.3**: Track station liveness by heartbeat and prune on TTL (~45 s). (Discovery behavior; the "list stays fresh" quality follows from it.)
 
 ### F2. Verify station identity (secp256k1)
-- **F2.1**: For `v:2` announces, reconstruct the canonical sig-less bytes and verify the ECDSA signature against the embedded pubkey.
+- **F2.1**: For `v:2` announces, **verify the ECDSA signature** against the embedded pubkey.
 - **F2.2**: **Drop** announces that fail verification (forgery/tamper).
 - **F2.3**: Keep `v:1` (unsigned) as anonymous/unverified.
-- **F2.4**: Render verified stations as `IP hidden by Tor · <3-word PGP fingerprint>`.
-- **F2.5**: **Pin** a verified station by its public key (persists; follows the broadcaster across renames).
+- **F2.4**: **Pin** a verified station by its public key (persists; follows the broadcaster across renames). *(Verified-station rendering — fingerprint + "IP hidden by Tor" — is a display trait, tracked under U3.)*
 
 ### F3. Play a station
 - **F3.1**: Stream `.onion` HLS through a module-owned listener Tor into an `ffplay` subprocess.
 - **F3.2**: Play direct (LAN) HLS URLs without Tor.
-- **F3.3**: Honest playback state: connecting → caching → playing, with a live connection pill and jitter buffer.
-- **F3.4**: No-audio watchdog: reap the listener Tor and retry (up to 3×) when audio never arrives.
+- **F3.3**: Expose the playback state machine (connecting → caching → playing) to the UI. (Honest-state *display* → **U4**.)
+- **F3.4**: No-audio watchdog: reap the listener Tor and retry (up to 3×) when audio never arrives. (Recovery *reliability* → **R2**.)
 
 ### F4. Android (standalone app)
 - **F4.1**: Run an on-device embedded Logos Messaging node (`liblogosdelivery` via JNI) — discover on the same topics/schema as desktop.
@@ -38,11 +37,12 @@
 - **U1**: Single design-system panel: live station list, verify/pin state, per-station connection status.
 - **U2**: First-launch **dependency-preflight card** (tor/ffmpeg/torsocks|privoxy) with copy-able install commands + Re-check.
 - **U3**: Fingerprint + "IP hidden by Tor" shown per station for honest trust signalling.
+- **U4**: **Honest playback state** — connecting → caching → playing with a live connection pill; never a faked "playing" (backs F3.3; see also P2).
 
 ## Reliability (R)
 - **R1**: Forged/tampered announces are dropped, never rendered.
 - **R2**: Playback recovers from a dead Tor rendezvous via the reap-and-retry watchdog (F3.4).
-- **R3**: `.onion` playback proven end-to-end on Linux (v0.2.0) and macOS/arm64 (v0.2.1); Android on-device discover→verify→play proven on device.
+- **R3**: `.onion` playback **verified end-to-end** — a manual discover → verify → play round-trip producing audible output — on Linux (v0.2.0) and macOS/arm64 (v0.2.1); the same on-device round-trip exercised on a physical Android device.
 
 ## Performance (P)
 - **P1**: Listener jitter buffer smooths HLS/Tor variability.
