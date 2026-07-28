@@ -1,6 +1,6 @@
 {
   "name": "receiver_ui",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "type": "ui_qml",
   "interface": "universal",
   "category": "messaging",
@@ -24,7 +24,8 @@
         "torsocks",
         "ffmpeg",
         "privoxy",
-        "secp256k1"
+        "secp256k1",
+        "libsodium"
       ]
     },
     "external_libraries": [],

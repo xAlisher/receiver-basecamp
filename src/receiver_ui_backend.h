@@ -25,6 +25,7 @@ public:
     QString startDiscovery() override;
     QString stopDiscovery() override;
     QString addTopic(QString topic) override;
+    QString addPrivateStream(QString title, QString pass) override;   // #69 hash(Title+Pass) topic + decrypt with Pass
     QString pinStation(QString pubkey) override;     // #14 pin/unpin a verified station by identity
     QString unpinStation(QString pubkey) override;
     QString play(QString streamUrl, QString stationName) override;
@@ -101,6 +102,12 @@ private:
 
     QHash<QString, Station> m_stations;   // keyed by topic+name
     QSet<QString> m_subscribed;
+
+    // #69 private streams — a derived hash(Title+Pass) topic we subscribed to, with the AEAD key +
+    // topic segment to decrypt its announces. Keyed by derived topic; ingestAnnounce tries these keys
+    // against any encrypted envelope (the AEAD tag identifies the right one). Pass/key kept in memory only.
+    struct PrivStream { QString seg; QByteArray key; };
+    QHash<QString, PrivStream> m_privStreams;
 
     // #14 pinned stations — keyed by station pubkey; meta = last-known {name,topic,streamUrl,privacy,fingerprint}
     // so a pin survives reload + shows offline with its remembered name until the same pubkey reappears.
