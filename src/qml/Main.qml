@@ -258,6 +258,12 @@ Item {
             if (next.length > 100) next = next.slice(0, 100)
             root.events = next
         }
+        // #69 after a private stream is added, switch the directory view to its derived topic so the
+        // discovered station isn't hidden by the public-directory filter.
+        function onPrivateStreamAdded(topic) {
+            root.selectedTopic = topic
+            privNameField.text = ""
+        }
     }
 
     Rectangle { anchors.fill: parent; color: root.bgPrimary }
@@ -494,13 +500,9 @@ Item {
                         enabled: privNameField.text.trim().length > 0 && privPassField.text.length > 0
                         onClicked: {
                             if (!backend) return
-                            // #69 on success the backend returns the derived topic → switch the directory
-                            // view to it so the discovered station isn't hidden by the public filter.
-                            var r = backend.addPrivateStream(privNameField.text.trim(), privPassField.text)
-                            if (r && r.indexOf("/radio-basecamp/") === 0) {
-                                root.selectedTopic = r
-                                privNameField.text = ""
-                            }
+                            // fires backend.addPrivateStream; the view switch happens in
+                            // Connections.onPrivateStreamAdded (QtRO slot returns can't reach QML).
+                            backend.addPrivateStream(privNameField.text.trim(), privPassField.text)
                             privPassField.text = ""
                         }
                     }

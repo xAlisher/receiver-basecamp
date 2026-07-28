@@ -24,6 +24,7 @@ class ReceiverUi
                                                               // hint — {ok,os,items:[{name,present}],installCmd}
 
     SIGNAL(activity(QString line))                            // human-readable log line for the UI
+    SIGNAL(privateStreamAdded(QString topic))                 // #69 derived topic → QML switches the directory view to it (slot returns can't cross QtRO to QML)
 
     SLOT(QString startDiscovery())                            // createNode/start/subscribe directory topic
     SLOT(QString stopDiscovery())

@@ -379,10 +379,11 @@ QString ReceiverUiBackend::addPrivateStream(QString title, QString pass)
     if (!subscribeTopic(topic)) return QStringLiteral("subscribe failed");
     m_privStreams.insert(topic, PrivStream{ seg, key });   // remembered so the announce decrypts
     log("added private stream \"" + title + "\" (encrypted)");
-    // #69 success → return the derived topic so the UI can switch the directory view to it (else the
-    // discovered station is filtered out by the public-directory view). Error paths return a message;
-    // a topic always starts with "/radio-basecamp/1/", so the caller can tell success from error.
-    return topic;
+    // #69 push the derived topic to the UI so it switches the directory view to the just-added stream
+    // (else the discovered station is hidden by the public-directory filter). A QtRO slot's RETURN
+    // value can't be read synchronously from QML — must be a signal.
+    emit privateStreamAdded(topic);
+    return QString();
 }
 
 bool ReceiverUiBackend::subscribeTopic(const QString& topic)
