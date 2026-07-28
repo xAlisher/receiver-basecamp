@@ -494,7 +494,13 @@ Item {
                         enabled: privNameField.text.trim().length > 0 && privPassField.text.length > 0
                         onClicked: {
                             if (!backend) return
-                            backend.addPrivateStream(privNameField.text.trim(), privPassField.text)
+                            // #69 on success the backend returns the derived topic → switch the directory
+                            // view to it so the discovered station isn't hidden by the public filter.
+                            var r = backend.addPrivateStream(privNameField.text.trim(), privPassField.text)
+                            if (r && r.indexOf("/radio-basecamp/") === 0) {
+                                root.selectedTopic = r
+                                privNameField.text = ""
+                            }
                             privPassField.text = ""
                         }
                     }
