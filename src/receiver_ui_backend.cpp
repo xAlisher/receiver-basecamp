@@ -1,5 +1,6 @@
 #include "receiver_ui_backend.h"
 #include "station_identity.h"  // #13 verify announce signatures (secp256k1)
+#include "station_crypto.h"    // #69 private streams: hash(Title+Pass) topic + decrypt with Pass
 #include "logos_sdk.h"        // generated: modules().delivery_module (Qt-typed) — #20 universal
 #include "logos_types.h"
 
@@ -250,6 +251,8 @@ void ReceiverUiBackend::onContextReady()
     // connectionStateChanged that delivery emits DURING createNode reenters this single ui-host thread
     // while it's blocked on createNode's reply → deadlock (sync-ipc-reentrancy). See wireDeliveryEvents().
     diag(QStringLiteral("onContextReady: modules() wired"));
+    StationCrypto::init();   // #69 libsodium — init before any private-stream topic/key/decrypt op
+    diag(QStringLiteral("private-stream crypto selftest: %1").arg(StationCrypto::selfTest() ? "OK" : "FAIL"));
     publishDeps();   // #55 re-publish now the QML replica is connected (constructor-time set can precede remoting)
     setPublicTopic(directoryTopic());   // #44 expose the public directory topic for the list filter
     QTimer::singleShot(2500, this, [this]{ diag(QStringLiteral("fire deferred startDiscovery")); startDiscovery(); });
@@ -360,6 +363,25 @@ QString ReceiverUiBackend::addTopic(QString topic)
     return QString();
 }
 
+// #69 A private stream: from the shared Title + Pass, derive the SAME topic the broadcaster derived
+// (hash(Title+Pass)), subscribe to it, and remember the AEAD key + segment so ingestAnnounce can
+// decrypt its (encrypted) announces. A listener needs BOTH Title and Pass; a relay node sees only a
+// random-hash topic it can't identify or decode. Symmetric to booth#66 (see docs/private-stream-protocol.md).
+QString ReceiverUiBackend::addPrivateStream(QString title, QString pass)
+{
+    title = title.trimmed();
+    if (title.isEmpty() || pass.isEmpty()) return QStringLiteral("need both a station name and a passphrase");
+    StationCrypto::init();
+    const QString topic = StationCrypto::deriveTopic(title, pass);
+    const QString seg   = StationCrypto::deriveTopicSegment(title, pass);
+    const QByteArray key = StationCrypto::deriveKey(title, pass);
+    if (key.size() != 32) return QStringLiteral("key derivation failed");
+    if (!subscribeTopic(topic)) return QStringLiteral("subscribe failed");
+    m_privStreams.insert(topic, PrivStream{ seg, key });   // remembered so the announce decrypts
+    log("added private stream \"" + title + "\" (encrypted)");
+    return QString();
+}
+
 bool ReceiverUiBackend::subscribeTopic(const QString& topic)
 {
     if (!isContextReady()) return false;
@@ -386,6 +408,20 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         if (raw.trimmed().startsWith('{')) json = raw;
     }
     if (json.isEmpty()) return;
+
+    // #69 private streams: an encrypted announce arrives as a {pv,enc,n,ct} envelope. Try each private
+    // stream's key (the AEAD tag identifies the right one, and fails closed for all others) — on success
+    // continue with the decrypted plaintext announce. A relay with no matching key just can't read it.
+    if (StationCrypto::isEnvelope(QString::fromUtf8(json))) {
+        const QString env = QString::fromUtf8(json);
+        QByteArray plain;
+        bool decrypted = false;
+        for (auto it = m_privStreams.constBegin(); it != m_privStreams.constEnd(); ++it) {
+            if (StationCrypto::decryptAnnounce(it.value().key, env, it.value().seg, plain)) { decrypted = true; break; }
+        }
+        if (!decrypted) return;   // not for us / undecodable — drop silently
+        json = plain;
+    }
 
     const QJsonObject o = QJsonDocument::fromJson(json).object();
     const QString name = o.value(QStringLiteral("name")).toString();

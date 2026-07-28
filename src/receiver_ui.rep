@@ -28,6 +28,7 @@ class ReceiverUi
     SLOT(QString startDiscovery())                            // createNode/start/subscribe directory topic
     SLOT(QString stopDiscovery())
     SLOT(QString addTopic(QString topic))                     // subscribe to a private/extra topic
+    SLOT(QString addPrivateStream(QString title, QString pass)) // #69 derive hash(Title+Pass) topic + key, subscribe, decrypt
     SLOT(QString pinStation(QString pubkey))                  // #14 pin a verified station by its identity
     SLOT(QString unpinStation(QString pubkey))                // #14 unpin
     SLOT(QString play(QString streamUrl, QString stationName))

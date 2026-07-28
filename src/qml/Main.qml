@@ -476,6 +476,32 @@ Item {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
 
+                // #69 Private stream (encrypted) — enter the station name + passphrase the broadcaster
+                // shared. Receiver derives the same hash(name+passphrase) topic and decrypts the announce;
+                // a relay node sees only a random-hash topic it can't identify or decode.
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacing.tiny
+                    LogosText { text: "Private stream (encrypted)"; font.pixelSize: Theme.typography.primaryText }
+                    LogosText {
+                        text: "Enter the station name + passphrase you were given. You need both to find and decode it."
+                        color: root.textMuted; font.pixelSize: Theme.typography.secondaryText
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
+                    LogosTextField { id: privNameField; Layout.fillWidth: true; placeholderText: "Station name (the shared Title)" }
+                    LogosTextField { id: privPassField; Layout.fillWidth: true; placeholderText: "Passphrase" }
+                    LogosButton {
+                        text: "Add private stream"
+                        enabled: privNameField.text.trim().length > 0 && privPassField.text.length > 0
+                        onClicked: {
+                            if (!backend) return
+                            backend.addPrivateStream(privNameField.text.trim(), privPassField.text)
+                            privPassField.text = ""
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.borderColor }
+
                 // Listener buffer
                 ColumnLayout {
                     Layout.fillWidth: true; spacing: Theme.spacing.tiny

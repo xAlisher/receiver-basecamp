@@ -24,7 +24,8 @@
         "torsocks",
         "ffmpeg",
         "privoxy",
-        "secp256k1"
+        "secp256k1",
+        "libsodium"
       ]
     },
     "external_libraries": [],
