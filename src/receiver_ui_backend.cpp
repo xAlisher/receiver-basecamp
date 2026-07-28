@@ -220,12 +220,16 @@ void ReceiverUiBackend::publishDeps()
     QString installCmd;
     if (!missingPkgs.isEmpty()) {
         const QString pkgs = missingPkgs.join(QLatin1Char(' '));
-        if (pkgMgr == QLatin1String("brew"))        installCmd = QStringLiteral("brew install ") + pkgs;
+        // #68 brew install must be non-interactive AND self-contained: HOMEBREW_NO_INSTALL_UPGRADE=1
+        // skips the dependency-upgrade "[y/n]" confirm, HOMEBREW_NO_AUTO_UPDATE=1 the auto-update noise,
+        // and "</dev/null" detaches stdin so no following pasted line (a launchctl setenv) is read as a
+        // prompt answer. Keep this brew invocation byte-identical with Main.qml macFastPath + README.
+        if (pkgMgr == QLatin1String("brew"))        installCmd = QStringLiteral("HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install ") + pkgs + QStringLiteral(" </dev/null");
         else if (pkgMgr == QLatin1String("nix")) {
             QStringList nixed; for (const QString& p : missingPkgs) nixed << (QStringLiteral("nixpkgs#") + p);
             installCmd = QStringLiteral("nix profile install ") + nixed.join(QLatin1Char(' '));
         }
-        else if (pkgMgr == QLatin1String("none"))   installCmd = QStringLiteral("# install Homebrew from https://brew.sh, then:\nbrew install ") + pkgs;
+        else if (pkgMgr == QLatin1String("none"))   installCmd = QStringLiteral("# install Homebrew from https://brew.sh, then:\nHOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install ") + pkgs + QStringLiteral(" </dev/null");
         else if (pkgMgr == QLatin1String("dnf"))    installCmd = QStringLiteral("sudo dnf install -y ") + pkgs;
         else if (pkgMgr == QLatin1String("pacman")) installCmd = QStringLiteral("sudo pacman -S --noconfirm ") + pkgs;
         else                                        installCmd = QStringLiteral("sudo apt install -y ") + pkgs;
