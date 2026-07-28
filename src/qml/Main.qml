@@ -267,10 +267,14 @@ Item {
     // No inline "#" comments or apostrophes here: macOS Terminal is zsh, which (unlike bash) doesn't
     // treat "#" as a comment interactively, so a comment's apostrophe would open a quote and hang at
     // "quote>". Double-quotes + $(...) only; the card's description explains what it does.
+    // #68 non-interactive AND self-contained: HOMEBREW_NO_INSTALL_UPGRADE=1 skips brew's dependency-
+    // upgrade "[y/n]" confirm, HOMEBREW_NO_AUTO_UPDATE=1 skips the auto-update noise, NONINTERACTIVE=1
+    // silences the Homebrew installer's RETURN prompt, and "</dev/null" on each install detaches stdin
+    // so NO following pasted line (the launchctl setenv lines) can ever be read as a prompt answer.
     readonly property string macFastPath:
-        "[ -x /opt/homebrew/bin/brew ] || /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n" +
+        "[ -x /opt/homebrew/bin/brew ] || NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" </dev/null\n" +
         "eval \"$(/opt/homebrew/bin/brew shellenv)\"\n" +
-        "brew install tor ffmpeg privoxy\n" +
+        "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install tor ffmpeg privoxy </dev/null\n" +
         "launchctl setenv RECEIVER_TOR_BIN \"$(brew --prefix)/bin/tor\"\n" +
         "launchctl setenv RECEIVER_FFPLAY_BIN \"$(brew --prefix)/bin/ffplay\"\n" +
         "launchctl setenv RECEIVER_PRIVOXY_BIN \"$(brew --prefix)/sbin/privoxy\""

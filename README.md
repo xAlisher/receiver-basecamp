@@ -44,7 +44,7 @@ sudo apt install -y tor torsocks ffmpeg
 **Step 1 — install the helpers.** Pick the one you use:
 ```bash
 # Homebrew (most macs — get it at https://brew.sh if you don't have it):
-brew install tor ffmpeg privoxy
+HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install tor ffmpeg privoxy </dev/null
 
 # …OR Nix, if you already run it:
 nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy
@@ -129,7 +129,7 @@ open "https://github.com/logos-co/logos-app/releases/latest"
 (SIP blocks its `DYLD_INSERT_LIBRARIES` shim), so the receiver routes Tor through a local **privoxy
 HTTP→SOCKS bridge** instead (`forward-socks5t` → the listener Tor; remote DNS, no IP/DNS leak). Install:
 ```bash
-nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy     # or:  brew install tor ffmpeg privoxy
+nix profile install nixpkgs#tor nixpkgs#ffmpeg nixpkgs#privoxy     # or:  HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install tor ffmpeg privoxy </dev/null
 ```
 macOS GUI apps get a minimal `PATH` (no `~/.nix-profile/bin` / `/opt/homebrew/bin`), so point the receiver
 at the bins with `launchctl setenv` — **use explicit paths**, not `$(which …)` (it can print a stale/removed
