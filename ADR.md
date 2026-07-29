@@ -213,24 +213,24 @@ for the card to see installed tools — an open friction point (#58/#59). Portab
 
 ---
 
-## ADR-10: A "private" station is obscurity today, real confidentiality is the target (listener side)
+## ADR-10: Private stations — real confidentiality via a secret-derived topic + decrypted announce (listener side)
 
-**Decision:** Receiver subscribes to the public directory topic plus **user-supplied private
-topics** (F1.1). Today a "private" station is protected only by an **unguessable topic string** —
-the listener still ingests an **unencrypted** announce.
+**Decision:** Receiver subscribes to the public directory topic plus, for a **private stream
+(v0.2.7)**, a **secret-derived topic** the listener computes from the user-entered `Title+Passphrase`
+— then **decrypts the announce** with the passphrase (⚙️ → *Private stream (encrypted)*). A bare
+unguessable topic string is no longer the mechanism.
 
-**Privacy is obscurity, not confidentiality** (mirror of Booth ADR-3, flagged in review by
-@vpavlin, 2026-07-28): knowing the topic is enough to listen, and a **relay node** subscribed to
-the shard already sees every `/radio-basecamp/1/*` contentTopic and can read the unencrypted
-payload — so the listener's "private" topic buys nothing against anyone relaying the network. It
-only keeps a station out of the *public directory* listing.
+**Why (obscurity is not confidentiality)** — mirror of Booth ADR-3, flagged in review by @vpavlin,
+2026-07-28: knowing an obscure topic is enough to listen, and a **relay node** subscribed to the
+shard already sees every `/radio-basecamp/1/*` contentTopic and could read an unencrypted announce —
+so an obscure topic alone buys nothing against anyone relaying the network; it only keeps a station
+out of the *public directory* listing.
 
-**Target model** (adopted, not yet built — **receiver#69** / booth#66): the listener derives the
-same secret-topic and decrypts, symmetric to the broadcaster —
-`topic = /radio-basecamp/1/hash(Title+Pass)/json`, then `payload = decrypt(payload, Pass)` using the
-user-entered `Title+Pass`. Until then Receiver can *reach* an obscure-topic station but cannot offer
-real confidentiality; the current build ships the weaker obscure-topic form (no payload decryption).
+**Implemented in v0.2.7** (**receiver#69** / booth#66): the listener derives the same secret topic
+and decrypts, symmetric to the broadcaster — `topic = /radio-basecamp/1/hash(Title+Passphrase)/json`,
+then `decrypt(announce, Passphrase)`. A relay node sees only that *a* random-hash stream exists and
+can neither identify nor decode it; only a holder of the Title+passphrase discovers *and* reads it.
 
-**Known limitation:** No revocation — anyone who learns the topic (public path) or `Title+Pass`
-(target private path) can listen indefinitely. Verification (ADR-5) is orthogonal: a signature
-proves *who* broadcast, not that the stream is *confidential*.
+**Known limitation:** No revocation — anyone who learns the topic (public path) or `Title+Passphrase`
+(private path) can listen indefinitely. Verification (ADR-5) is orthogonal: a signature proves *who*
+broadcast, not that the stream is *confidential*.

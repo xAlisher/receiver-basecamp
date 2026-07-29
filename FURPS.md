@@ -1,16 +1,16 @@
 # Receiver — Functional Scope (FURPS+)
 
-> **Status:** Basecamp module v0.2.0.5 shipped (Linux + macOS/arm64) · Android v1.0.0 shipped
+> **Status:** Basecamp module v0.2.7 shipped (Linux + macOS/arm64 · **private streams**) · Android v1.0.0 shipped
 > **Scope:** Listening only — discover, verify, and play decentralized radio. Hosting is the [Booth](https://github.com/xAlisher/booth-basecamp)'s job.
 > **Target:** Logos Basecamp (Linux x86_64, macOS arm64); Android 13+ (arm64, sideload). Depends on `delivery_module`.
-> **Non-goals (this version):** hosting/broadcasting · TOFU key-rotation warnings · bundled runtime binaries · real private-stream confidentiality (secret-topic derivation + payload decryption — target, ADR-10 / receiver#69)
+> **Non-goals (this version):** hosting/broadcasting · TOFU key-rotation warnings · bundled runtime binaries
 
 ---
 
 ## Functionality (F)
 
 ### F1. Discover stations over Logos Messaging
-- **F1.1**: Subscribe to the public directory topic `/radio-basecamp/1/directory/json` and user-supplied private topics. (A "private" topic is *obscurity only* today — no payload decryption; real confidentiality is the target, **ADR-10 / receiver#69**.)
+- **F1.1**: Subscribe to the public directory topic `/radio-basecamp/1/directory/json`. For a **private stream (v0.2.7)**, derive the same **secret topic `hash(Title+Passphrase)`** from the user-entered Title+passphrase and **decrypt the announce** — real confidentiality, not just an obscure topic (**ADR-10 / receiver#69**).
 - **F1.2**: Ingest JSON station announces broadcast by Booth/radio hosts.
 - **F1.3**: Track station liveness by heartbeat and prune on TTL (~45 s). (Discovery behavior; the "list stays fresh" quality follows from it.)
 
