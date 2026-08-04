@@ -716,8 +716,12 @@ QString ReceiverUiBackend::startFfplay()
     // #76 priority list: pulse (host pulseaudio / pipewire-pulse — covers modern desktops) → alsa
     // (system libasound; the packaged ffplay uses the system loader/glibc so no lib-mix). SDL2 falls
     // through the list, so a pure-ALSA host still gets audio. NOT bare "pulse" — that fails with no daemon.
+    // LINUX ONLY: macOS SDL2 has CoreAudio (no pulse/alsa backend), so forcing this list makes SDL
+    // audio-init fail → the bundled ffplay exits instantly (#78). Leave mac to SDL's default (CoreAudio).
+#if defined(__linux__)
     if (!m_moduleDir.isEmpty() && ffplay.startsWith(m_moduleDir + QStringLiteral("/bin/")))
         env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse,alsa"));
+#endif
     if (onion) {
 #ifdef __APPLE__
         // macOS: torsocks (LD_PRELOAD) is unusable under SIP. Route .onion playback through a local privoxy
