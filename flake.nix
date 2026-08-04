@@ -10,12 +10,27 @@
     # getClient("delivery_module") hanging on a QRO/version mismatch. Matching the version is the fix.
     delivery_module.url = "github:logos-co/logos-delivery-module";
     delivery_module.inputs.logos-module-builder.follows = "logos-module-builder";
+    # #75/#77 Single-glibc source for the self-contained helper bundle (ffplay+tor+privoxy+libpulse+
+    # libtorsocks). Pinned to 24.05 for classic SDL2; mixing nixpkgs revisions mixes glibc → load fails.
+    nixpkgs-2405.url = "github:NixOS/nixpkgs/nixos-24.05";
   };
 
-  outputs = inputs@{ logos-module-builder, ... }:
+  outputs = inputs@{ logos-module-builder, nixpkgs-2405, ... }:
+    let
+      # Bundle is x86_64-linux only for now; darwin-arm64 (@loader_path + CoreAudio) is #78.
+      pkgs2405 = nixpkgs-2405.legacyPackages.x86_64-linux;
+      ffplayMin = import ./nix/ffplay-min-fn.nix { inherit (pkgs2405) ffmpeg; };
+      helperBundle = pkgs2405.callPackage ./nix/helper-bundle.nix { inherit ffplayMin; };
+    in
     logos-module-builder.lib.mkLogosQmlModule {
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
+      # #77 ship the self-contained helpers at <moduleDir>/bin/ so the built+signed .lgx is zero-install.
+      postInstall = ''
+        mkdir -p $out/lib/bin
+        cp -a ${helperBundle}/. $out/lib/bin/
+        chmod -R u+w $out/lib/bin
+      '';
     };
 }
