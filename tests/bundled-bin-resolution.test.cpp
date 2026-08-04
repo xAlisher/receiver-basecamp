@@ -19,9 +19,27 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#define PLUGIN_LIB "receiver_ui_plugin.dylib"
+#else
+#define PLUGIN_LIB "receiver_ui_plugin.so"
+#endif
 
-// Mirror of ReceiverUiBackend::findModuleDir() (Linux branch): find the dir of the mapped plugin .so.
+// Mirror of ReceiverUiBackend::findModuleDir(): find the dir of the loaded plugin lib.
 static std::string findModuleDir() {
+#if defined(__APPLE__)
+    // macOS: dyld image list (mirrors the backend's _dyld branch).
+    for (uint32_t i = 0, n = _dyld_image_count(); i < n; ++i) {
+        const char* name = _dyld_get_image_name(i);
+        if (name && (std::strstr(name, "receiver_ui_plugin") || std::strstr(name, "receiver_ui_replica_factory"))) {
+            std::string p = name; const size_t d = p.find_last_of('/');
+            return d == std::string::npos ? std::string() : p.substr(0, d);
+        }
+    }
+    return std::string();
+#else
+    // Linux: /proc/self/maps (mirrors the backend's Linux branch).
     std::ifstream maps("/proc/self/maps");
     std::string line;
     while (std::getline(maps, line)) {
@@ -35,6 +53,7 @@ static std::string findModuleDir() {
         return d == std::string::npos ? std::string() : path.substr(0, d);   // dirname = module dir
     }
     return std::string();
+#endif
 }
 
 // Mirror of ReceiverUiBackend::bundledBin(): <moduleDir>/bin/<name> if present + executable, else "".
@@ -57,12 +76,19 @@ int main(int argc, char** argv) {
     char tmpl[] = "/tmp/rcv-bin-test-XXXXXX";
     const char* dir = mkdtemp(tmpl);
     if (!dir) return fail("mkdtemp");
-    const std::string moduleDir = dir;
+    // canonicalize: on macOS /tmp is a symlink to /private/tmp, and dyld reports the resolved path
+    char realbuf[4096];
+    const std::string moduleDir = realpath(dir, realbuf) ? std::string(realbuf) : std::string(dir);
     const std::string stubSrc = moduleDir + "/stub.c";
-    const std::string stubSo  = moduleDir + "/receiver_ui_plugin.so";   // named exactly like the real plugin
+    const std::string stubSo  = moduleDir + "/" PLUGIN_LIB;   // named exactly like the real plugin
     { std::ofstream(stubSrc) << "int _rcv_stub(void){return 0;}\n"; }
-    if (std::system(("cc -shared -fPIC -o '" + stubSo + "' '" + stubSrc + "'").c_str()) != 0)
-        return fail("compile stub .so");
+#if defined(__APPLE__)
+    const std::string shflags = "-dynamiclib";
+#else
+    const std::string shflags = "-shared -fPIC";
+#endif
+    if (std::system(("cc " + shflags + " -o '" + stubSo + "' '" + stubSrc + "'").c_str()) != 0)
+        return fail("compile stub plugin lib");
     // stage the WHOLE bundle (ffplay + its $ORIGIN libs) under bin/, exactly as it ships
     if (std::system(("mkdir -p '" + moduleDir + "/bin' && cp -a '" + bundleDir + "'/. '" + moduleDir + "/bin/'").c_str()) != 0)
         return fail("stage bundle into bin/");
