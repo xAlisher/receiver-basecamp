@@ -228,6 +228,11 @@ void ReceiverUiBackend::publishDeps()
             const QString bundled = bundledBin(name);   // #75 self-contained helper shipped in the module
             if (!bundled.isEmpty()) { state = QStringLiteral("present"); path = bundled; }
         }
+        // #75 torsocks ships as an LD_PRELOAD .so (no wrapper) — count the bundled libtorsocks.so as present
+        if (state.isEmpty() && name == QLatin1String("torsocks") && !m_moduleDir.isEmpty()) {
+            const QString ts = m_moduleDir + QStringLiteral("/bin/libtorsocks.so");
+            if (QFileInfo::exists(ts)) { state = QStringLiteral("present"); path = ts; }
+        }
         if (state.isEmpty()) {
             const QString onPath = QStandardPaths::findExecutable(name);         // the (minimal) GUI PATH
             if (!onPath.isEmpty()) { state = QStringLiteral("present"); path = onPath; }
@@ -714,11 +719,22 @@ QString ReceiverUiBackend::startFfplay()
 #else
         // Linux: ffmpeg has no native SOCKS → route .onion playback through torsocks (LD_PRELOAD → tor SOCKS).
         ffargs << m_playingUrl;
-        program = resolveBin(QStringLiteral("torsocks"), "RECEIVER_TORSOCKS_BIN");
-        args = QStringList() << ffplay << ffargs;
         env.insert("TORSOCKS_TOR_ADDRESS", "127.0.0.1");            // lock torsocks onto OUR tor (Senty ISSUE-4)
         env.insert("TORSOCKS_TOR_PORT", QString::number(m_listenSocksPort));
         env.insert("TORSOCKS_ISOLATE_PID", "1");
+        // #75 zero-install: when we have a bundled libtorsocks (shipped next to the bundled ffplay), LD_PRELOAD
+        // it into ffplay DIRECTLY rather than shelling through the `torsocks` wrapper — nix's wrapper hardcodes
+        // its own store prefix, so it can't be relocated into the module. Same effect (intercept connect→SOCKS),
+        // and the .so is from the same nixpkgs as ffplay so their glibc matches (a system libtorsocks would not).
+        const QString bundledTs = (!m_moduleDir.isEmpty() && ffplay.startsWith(m_moduleDir + QStringLiteral("/bin/")))
+            ? m_moduleDir + QStringLiteral("/bin/libtorsocks.so") : QString();
+        if (!bundledTs.isEmpty() && QFileInfo::exists(bundledTs)) {
+            env.insert("LD_PRELOAD", bundledTs);
+            program = ffplay; args = ffargs;
+        } else {
+            program = resolveBin(QStringLiteral("torsocks"), "RECEIVER_TORSOCKS_BIN");   // fall back to system torsocks
+            args = QStringList() << ffplay << ffargs;
+        }
 #endif
     } else {
         ffargs << m_playingUrl;

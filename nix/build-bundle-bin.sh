@@ -29,6 +29,8 @@ NET=$(nix build --impure --no-link --print-out-paths --expr \
    in p.buildEnv{name=\"rcv-net\";paths=[p.tor p.privoxy];}" 2>/dev/null | head -1)
 echo ">> fetching libpulse (24.05)…"
 PA=$(nix build --no-link --print-out-paths "$NIXPKGS#libpulseaudio" 2>/dev/null | head -1)
+echo ">> fetching torsocks (24.05)…"
+TS=$(nix build --no-link --print-out-paths "$NIXPKGS#torsocks" 2>/dev/null | head -1)
 
 rm -rf "$OUT"; mkdir -p "$OUT"
 add() {   # copy a binary/lib + its (non-glibc) shared-lib closure into the bundle
@@ -46,6 +48,10 @@ add "$NET/bin/privoxy"
 # libpulse + the libpulsecommon it dlopens (SDL2's pulse backend needs both)
 LP=$(find "$PA" -name 'libpulse.so.0.*' | head -1); add "$LP"; cp -Lf "$LP" "$OUT/libpulse.so.0"
 find "$PA" -name 'libpulsecommon-*.so' -exec cp -Lf {} "$OUT/" \; 2>/dev/null || true
+# libtorsocks: the backend LD_PRELOADs this into the bundled ffplay for .onion playback (Linux) instead
+# of the `torsocks` wrapper (which hardcodes its nix-store prefix and can't be relocated).
+TSO=$(find "$TS" -name 'libtorsocks.so.0.0.0' | head -1); [ -z "$TSO" ] && TSO=$(find "$TS" -name 'libtorsocks.so*' -not -type l | head -1)
+add "$TSO"; cp -Lf "$TSO" "$OUT/libtorsocks.so"
 chmod -R u+w "$OUT"
 for f in "$OUT"/*; do patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true; done
 
