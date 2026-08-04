@@ -58,12 +58,31 @@ QString randomHex(int bytes) {
     return s;
 }
 
-// Resolve a runtime helper: env override → bare name on PATH (option 1: tor/ffmpeg installed per-OS).
-// NB: deliberately no dladdr/"next to the .so" lookup — that pulls dladdr@GLIBC_2.34, which the
-// AppImage's older bundled glibc can't resolve, so the plugin fails to dlopen (sidebar spinner).
-QString resolveBin(const QString& name, const char* envVar) {
-    const QString env = qEnvironmentVariable(envVar);
-    return env.isEmpty() ? name : env;
+// #75 Find this module's install dir (…/plugins/receiver_ui) so we can prefer the self-contained
+// binaries bundled under <moduleDir>/bin/ (ffplay/tor/privoxy) over anything the user installed.
+// NB: deliberately NOT dladdr — that pulls dladdr@GLIBC_2.34, which the AppImage's older bundled
+// glibc can't resolve, so the plugin would fail to dlopen (sidebar spinner). We read the already-
+// mapped plugin's path out of /proc/self/maps (Linux: only fopen/fgets, ancient symbols) or the
+// dyld image list (macOS) — both self-contained, both cheap, both run at construction.
+QString findModuleDir() {
+#if defined(__linux__)
+    QFile f(QStringLiteral("/proc/self/maps"));
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        // NB: /proc/self/maps is a virtual file that reports size 0 → QFile::atEnd() is true immediately,
+        // so a `while (!f.atEnd())` loop never runs. Read via readLine() until it returns empty (real EOF).
+        QByteArray line;
+        while (!(line = f.readLine()).isEmpty()) {
+            if (line.contains("receiver_ui_plugin.so") || line.contains("receiver_ui_replica_factory.so")) {
+                const int slash = line.indexOf('/');
+                if (slash >= 0)
+                    return QFileInfo(QString::fromUtf8(line.mid(slash)).trimmed()).absolutePath();
+            }
+        }
+    }
+#endif
+    // macOS dyld branch is added at the darwin-build step (#75); until then this returns "" on mac
+    // and resolveBin falls back to env/PATH (the deps-card path), i.e. no behaviour change there.
+    return QString();
 }
 
 // Spawned system binaries (tor/ffplay/torsocks) must NOT inherit the AppImage's LD_LIBRARY_PATH/
@@ -81,6 +100,7 @@ ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
 {
     // cheap, no IPC — restore persisted settings + start the station-TTL prune loop. Delivery wiring
     // waits for modules() (onContextReady).
+    m_moduleDir = findModuleDir();   // #75 locate <…>/plugins/receiver_ui so bundledBin() can prefer bin/*
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
     setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
@@ -102,6 +122,27 @@ QString ReceiverUiBackend::checkDeps()
 {
     publishDeps();
     return QString();   // "" = success — Re-check just refreshes the depsJson PROP the card binds to
+}
+
+// #75 A helper bundled next to the plugin at <moduleDir>/bin/<name> (self-contained, $ORIGIN-rpath'd).
+// "" if we don't know the module dir (macOS pre-darwin-wiring) or the bundle isn't present.
+QString ReceiverUiBackend::bundledBin(const QString& name) const
+{
+    if (m_moduleDir.isEmpty()) return QString();
+    const QFileInfo fi(m_moduleDir + QStringLiteral("/bin/") + name);
+    return (fi.exists() && fi.isExecutable()) ? fi.absoluteFilePath() : QString();
+}
+
+// #75 Resolve a runtime helper. Priority: explicit RECEIVER_*_BIN override (debugging/BYO) →
+// the self-contained bundled binary (zero-install) → bare name on PATH (legacy: user-installed).
+// Bundled binaries are $ORIGIN-rpath'd, so cleanSpawnEnv()'s dropped LD_LIBRARY_PATH doesn't hurt them.
+QString ReceiverUiBackend::resolveBin(const QString& name, const char* envVar) const
+{
+    const QString env = qEnvironmentVariable(envVar);
+    if (!env.isEmpty()) return env;
+    const QString bundled = bundledBin(name);
+    if (!bundled.isEmpty()) return bundled;
+    return name;
 }
 
 // #55 Detect the external playback helpers on PATH and publish the JSON the first-launch card reads.
@@ -182,6 +223,10 @@ void ReceiverUiBackend::publishDeps()
             const QFileInfo fi(envOverride);                                        // explicit RECEIVER_*_BIN path
             if (fi.exists() && fi.isExecutable()) { state = QStringLiteral("present"); path = fi.absoluteFilePath(); }
             else                                    state = QStringLiteral("missing");   // override points at a dead path
+        }
+        if (state.isEmpty()) {
+            const QString bundled = bundledBin(name);   // #75 self-contained helper shipped in the module
+            if (!bundled.isEmpty()) { state = QStringLiteral("present"); path = bundled; }
         }
         if (state.isEmpty()) {
             const QString onPath = QStandardPaths::findExecutable(name);         // the (minimal) GUI PATH
