@@ -8,16 +8,18 @@
 #
 # ALL inputs come from ONE nixpkgs (nixos-24.05 — classic SDL2, and one glibc on Linux). The standalone
 # Linux mirror is nix/build-bundle-bin.sh.
-{ stdenvNoCC, lib, ffplayMin, tor, privoxy
+# Uses `stdenv` (not stdenvNoCC) so the darwin build env provides otool + install_name_tool (the cc
+# toolchain's Mach-O tools); on Linux the cc is just unused.
+{ stdenv, lib, ffplayMin, tor, privoxy
 , glibc ? null, patchelf ? null, libpulseaudio ? null, torsocks ? null   # linux
-, cctools ? null, sigtool ? null                                          # darwin
+, sigtool ? null                                                          # darwin (codesign)
 }:
-let isDarwin = stdenvNoCC.hostPlatform.isDarwin;
-in stdenvNoCC.mkDerivation {
+let isDarwin = stdenv.hostPlatform.isDarwin;
+in stdenv.mkDerivation {
   pname = "receiver-helper-bundle";
   version = "1";
   dontUnpack = true;
-  nativeBuildInputs = if isDarwin then [ cctools sigtool ] else [ patchelf glibc.bin ];
+  nativeBuildInputs = if isDarwin then [ sigtool ] else [ patchelf glibc.bin ];
   buildCommand =
     if isDarwin then ''
       mkdir -p $out
