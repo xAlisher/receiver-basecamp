@@ -703,8 +703,11 @@ QString ReceiverUiBackend::startFfplay()
     // loading glibc-mismatched system audio libs (that segfaults). We ship libpulse from the SAME nixpkgs
     // and force SDL's pulse backend, which talks to the host pulseaudio / pipewire-pulse over the socket —
     // protocol-stable, no lib-mixing. System ffplay (has all backends) is left to auto-detect.
+    // #76 priority list: pulse (host pulseaudio / pipewire-pulse — covers modern desktops) → alsa
+    // (system libasound; the packaged ffplay uses the system loader/glibc so no lib-mix). SDL2 falls
+    // through the list, so a pure-ALSA host still gets audio. NOT bare "pulse" — that fails with no daemon.
     if (!m_moduleDir.isEmpty() && ffplay.startsWith(m_moduleDir + QStringLiteral("/bin/")))
-        env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse"));
+        env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse,alsa"));
     if (onion) {
 #ifdef __APPLE__
         // macOS: torsocks (LD_PRELOAD) is unusable under SIP. Route .onion playback through a local privoxy
