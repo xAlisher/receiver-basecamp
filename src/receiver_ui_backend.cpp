@@ -951,7 +951,15 @@ QString ReceiverUiBackend::ensurePlaybackProxy()
         // through tor (no clearnet/DNS leak — preserves the torsocks no-leak property).
         QTextStream s(&cfg);
         s << "listen-address 127.0.0.1:" << m_playProxyPort << "\n"
-          << "forward-socks5t / 127.0.0.1:" << socks << " .\n";
+          << "forward-socks5t / 127.0.0.1:" << socks << " .\n"
+          // #78 Onion HLS over Tor is bursty: a reused keep-alive connection often maps to a Tor stream
+          // the exit already closed, so privoxy returns "500 Internal Privoxy Error" on the next playlist
+          // reload → ffplay drops the stream (intermittent mac disconnects). Force a FRESH Tor stream per
+          // request (no connection reuse) and retry the SOCKS connect. Verified on the M1: 500s → 0.
+          << "connection-sharing 0\n"
+          << "keep-alive-timeout 0\n"
+          << "forwarded-connect-retries 3\n"
+          << "socket-timeout 120\n";
     }
     cfg.close();
     const QString bin = resolveBin(QStringLiteral("privoxy"), "RECEIVER_PRIVOXY_BIN");
