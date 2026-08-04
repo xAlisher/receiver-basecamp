@@ -66,6 +66,8 @@ private:
     void savePins();                                 // #14 persist pinned set to QSettings
     bool subscribeTopic(const QString& topic);
     void publishDeps();   // #55 detect tor/ffplay + torsocks(Linux)/privoxy(mac) on PATH → depsJson
+    QString bundledBin(const QString& name) const;                 // #75 <moduleDir>/bin/<name> if present+exec, else ""
+    QString resolveBin(const QString& name, const char* envVar) const;  // #75 override → bundled → PATH
     QString directoryTopic() const;
     QString cacheDir() const;
     void log(const QString& line);
@@ -82,6 +84,7 @@ private:
     void    pollTorStatus();            // #37 parse tor.log bootstrap % → torStatus PROP
     bool    startTorProc(QString& dirOut, const QString& cfg, int socksPort, QString& errOut);
 
+    QString         m_moduleDir;   // #75 …/plugins/receiver_ui (from /proc/self/maps) → bundledBin() base
     bool            m_eventsWired = false;
     QTimer*         m_pruneTimer = nullptr;
 

@@ -23,6 +23,10 @@
 #include <csignal>   // #52 kill()/SIGKILL to reap orphaned tor listeners by PID
 #include <QTimer>
 #include <QUrl>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>   // #78 _dyld_image_count/_dyld_get_image_name → module dir (no dladdr)
+#include <cstring>         // std::strstr
+#endif
 
 namespace {
 constexpr int    kTtlMs       = 45000;   // drop a station after 45s without a heartbeat (3 missed beats)
@@ -58,12 +62,37 @@ QString randomHex(int bytes) {
     return s;
 }
 
-// Resolve a runtime helper: env override → bare name on PATH (option 1: tor/ffmpeg installed per-OS).
-// NB: deliberately no dladdr/"next to the .so" lookup — that pulls dladdr@GLIBC_2.34, which the
-// AppImage's older bundled glibc can't resolve, so the plugin fails to dlopen (sidebar spinner).
-QString resolveBin(const QString& name, const char* envVar) {
-    const QString env = qEnvironmentVariable(envVar);
-    return env.isEmpty() ? name : env;
+// #75 Find this module's install dir (…/plugins/receiver_ui) so we can prefer the self-contained
+// binaries bundled under <moduleDir>/bin/ (ffplay/tor/privoxy) over anything the user installed.
+// NB: deliberately NOT dladdr — that pulls dladdr@GLIBC_2.34, which the AppImage's older bundled
+// glibc can't resolve, so the plugin would fail to dlopen (sidebar spinner). We read the already-
+// mapped plugin's path out of /proc/self/maps (Linux: only fopen/fgets, ancient symbols) or the
+// dyld image list (macOS) — both self-contained, both cheap, both run at construction.
+QString findModuleDir() {
+#if defined(__linux__)
+    QFile f(QStringLiteral("/proc/self/maps"));
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        // NB: /proc/self/maps is a virtual file that reports size 0 → QFile::atEnd() is true immediately,
+        // so a `while (!f.atEnd())` loop never runs. Read via readLine() until it returns empty (real EOF).
+        QByteArray line;
+        while (!(line = f.readLine()).isEmpty()) {
+            if (line.contains("receiver_ui_plugin.so") || line.contains("receiver_ui_replica_factory.so")) {
+                const int slash = line.indexOf('/');
+                if (slash >= 0)
+                    return QFileInfo(QString::fromUtf8(line.mid(slash)).trimmed()).absolutePath();
+            }
+        }
+    }
+#elif defined(__APPLE__)
+    // macOS: walk the dyld image list for the loaded plugin dylib and take its dir. Not dladdr (same
+    // GLIBC_2.34 caution as Linux) — _dyld_get_image_name is a plain libSystem call, always present.
+    for (uint32_t i = 0, n = _dyld_image_count(); i < n; ++i) {
+        const char* name = _dyld_get_image_name(i);
+        if (name && (std::strstr(name, "receiver_ui_plugin") || std::strstr(name, "receiver_ui_replica_factory")))
+            return QFileInfo(QString::fromUtf8(name)).absolutePath();
+    }
+#endif
+    return QString();   // unknown module dir → resolveBin falls back to env/PATH (the deps-card path)
 }
 
 // Spawned system binaries (tor/ffplay/torsocks) must NOT inherit the AppImage's LD_LIBRARY_PATH/
@@ -81,6 +110,7 @@ ReceiverUiBackend::ReceiverUiBackend(QObject* parent)
 {
     // cheap, no IPC — restore persisted settings + start the station-TTL prune loop. Delivery wiring
     // waits for modules() (onContextReady).
+    m_moduleDir = findModuleDir();   // #75 locate <…>/plugins/receiver_ui so bundledBin() can prefer bin/*
     QSettings s{QLatin1String(kSettingsOrg), QLatin1String(kSettingsApp)};
     setListenBuffer(qBound(2, s.value(QStringLiteral("listenBuffer"), 20).toInt(), 60));  // #11 ceiling 60s
     setHideCache(s.value(QStringLiteral("hideCache"), false).toBool());
@@ -102,6 +132,27 @@ QString ReceiverUiBackend::checkDeps()
 {
     publishDeps();
     return QString();   // "" = success — Re-check just refreshes the depsJson PROP the card binds to
+}
+
+// #75 A helper bundled next to the plugin at <moduleDir>/bin/<name> (self-contained, $ORIGIN-rpath'd).
+// "" if we don't know the module dir (macOS pre-darwin-wiring) or the bundle isn't present.
+QString ReceiverUiBackend::bundledBin(const QString& name) const
+{
+    if (m_moduleDir.isEmpty()) return QString();
+    const QFileInfo fi(m_moduleDir + QStringLiteral("/bin/") + name);
+    return (fi.exists() && fi.isExecutable()) ? fi.absoluteFilePath() : QString();
+}
+
+// #75 Resolve a runtime helper. Priority: explicit RECEIVER_*_BIN override (debugging/BYO) →
+// the self-contained bundled binary (zero-install) → bare name on PATH (legacy: user-installed).
+// Bundled binaries are $ORIGIN-rpath'd, so cleanSpawnEnv()'s dropped LD_LIBRARY_PATH doesn't hurt them.
+QString ReceiverUiBackend::resolveBin(const QString& name, const char* envVar) const
+{
+    const QString env = qEnvironmentVariable(envVar);
+    if (!env.isEmpty()) return env;
+    const QString bundled = bundledBin(name);
+    if (!bundled.isEmpty()) return bundled;
+    return name;
 }
 
 // #55 Detect the external playback helpers on PATH and publish the JSON the first-launch card reads.
@@ -182,6 +233,15 @@ void ReceiverUiBackend::publishDeps()
             const QFileInfo fi(envOverride);                                        // explicit RECEIVER_*_BIN path
             if (fi.exists() && fi.isExecutable()) { state = QStringLiteral("present"); path = fi.absoluteFilePath(); }
             else                                    state = QStringLiteral("missing");   // override points at a dead path
+        }
+        if (state.isEmpty()) {
+            const QString bundled = bundledBin(name);   // #75 self-contained helper shipped in the module
+            if (!bundled.isEmpty()) { state = QStringLiteral("present"); path = bundled; }
+        }
+        // #75 torsocks ships as an LD_PRELOAD .so (no wrapper) — count the bundled libtorsocks.so as present
+        if (state.isEmpty() && name == QLatin1String("torsocks") && !m_moduleDir.isEmpty()) {
+            const QString ts = m_moduleDir + QStringLiteral("/bin/libtorsocks.so");
+            if (QFileInfo::exists(ts)) { state = QStringLiteral("present"); path = ts; }
         }
         if (state.isEmpty()) {
             const QString onPath = QStandardPaths::findExecutable(name);         // the (minimal) GUI PATH
@@ -649,6 +709,19 @@ QString ReceiverUiBackend::startFfplay()
 
     QString program; QStringList args;
     QProcessEnvironment env = cleanSpawnEnv();
+    // #75 A bundled ffplay is nix-built (nix glibc): its SDL2 must reach the host audio server WITHOUT
+    // loading glibc-mismatched system audio libs (that segfaults). We ship libpulse from the SAME nixpkgs
+    // and force SDL's pulse backend, which talks to the host pulseaudio / pipewire-pulse over the socket —
+    // protocol-stable, no lib-mixing. System ffplay (has all backends) is left to auto-detect.
+    // #76 priority list: pulse (host pulseaudio / pipewire-pulse — covers modern desktops) → alsa
+    // (system libasound; the packaged ffplay uses the system loader/glibc so no lib-mix). SDL2 falls
+    // through the list, so a pure-ALSA host still gets audio. NOT bare "pulse" — that fails with no daemon.
+    // LINUX ONLY: macOS SDL2 has CoreAudio (no pulse/alsa backend), so forcing this list makes SDL
+    // audio-init fail → the bundled ffplay exits instantly (#78). Leave mac to SDL's default (CoreAudio).
+#if defined(__linux__)
+    if (!m_moduleDir.isEmpty() && ffplay.startsWith(m_moduleDir + QStringLiteral("/bin/")))
+        env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse,alsa"));
+#endif
     if (onion) {
 #ifdef __APPLE__
         // macOS: torsocks (LD_PRELOAD) is unusable under SIP. Route .onion playback through a local privoxy
@@ -663,11 +736,22 @@ QString ReceiverUiBackend::startFfplay()
 #else
         // Linux: ffmpeg has no native SOCKS → route .onion playback through torsocks (LD_PRELOAD → tor SOCKS).
         ffargs << m_playingUrl;
-        program = resolveBin(QStringLiteral("torsocks"), "RECEIVER_TORSOCKS_BIN");
-        args = QStringList() << ffplay << ffargs;
         env.insert("TORSOCKS_TOR_ADDRESS", "127.0.0.1");            // lock torsocks onto OUR tor (Senty ISSUE-4)
         env.insert("TORSOCKS_TOR_PORT", QString::number(m_listenSocksPort));
         env.insert("TORSOCKS_ISOLATE_PID", "1");
+        // #75 zero-install: when we have a bundled libtorsocks (shipped next to the bundled ffplay), LD_PRELOAD
+        // it into ffplay DIRECTLY rather than shelling through the `torsocks` wrapper — nix's wrapper hardcodes
+        // its own store prefix, so it can't be relocated into the module. Same effect (intercept connect→SOCKS),
+        // and the .so is from the same nixpkgs as ffplay so their glibc matches (a system libtorsocks would not).
+        const QString bundledTs = (!m_moduleDir.isEmpty() && ffplay.startsWith(m_moduleDir + QStringLiteral("/bin/")))
+            ? m_moduleDir + QStringLiteral("/bin/libtorsocks.so") : QString();
+        if (!bundledTs.isEmpty() && QFileInfo::exists(bundledTs)) {
+            env.insert("LD_PRELOAD", bundledTs);
+            program = ffplay; args = ffargs;
+        } else {
+            program = resolveBin(QStringLiteral("torsocks"), "RECEIVER_TORSOCKS_BIN");   // fall back to system torsocks
+            args = QStringList() << ffplay << ffargs;
+        }
 #endif
     } else {
         ffargs << m_playingUrl;
@@ -871,7 +955,15 @@ QString ReceiverUiBackend::ensurePlaybackProxy()
         // through tor (no clearnet/DNS leak — preserves the torsocks no-leak property).
         QTextStream s(&cfg);
         s << "listen-address 127.0.0.1:" << m_playProxyPort << "\n"
-          << "forward-socks5t / 127.0.0.1:" << socks << " .\n";
+          << "forward-socks5t / 127.0.0.1:" << socks << " .\n"
+          // #78 Onion HLS over Tor is bursty: a reused keep-alive connection often maps to a Tor stream
+          // the exit already closed, so privoxy returns "500 Internal Privoxy Error" on the next playlist
+          // reload → ffplay drops the stream (intermittent mac disconnects). Force a FRESH Tor stream per
+          // request (no connection reuse) and retry the SOCKS connect. Verified on the M1: 500s → 0.
+          << "connection-sharing 0\n"
+          << "keep-alive-timeout 0\n"
+          << "forwarded-connect-retries 3\n"
+          << "socket-timeout 120\n";
     }
     cfg.close();
     const QString bin = resolveBin(QStringLiteral("privoxy"), "RECEIVER_PRIVOXY_BIN");
