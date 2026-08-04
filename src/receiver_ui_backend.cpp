@@ -694,6 +694,12 @@ QString ReceiverUiBackend::startFfplay()
 
     QString program; QStringList args;
     QProcessEnvironment env = cleanSpawnEnv();
+    // #75 A bundled ffplay is nix-built (nix glibc): its SDL2 must reach the host audio server WITHOUT
+    // loading glibc-mismatched system audio libs (that segfaults). We ship libpulse from the SAME nixpkgs
+    // and force SDL's pulse backend, which talks to the host pulseaudio / pipewire-pulse over the socket —
+    // protocol-stable, no lib-mixing. System ffplay (has all backends) is left to auto-detect.
+    if (!m_moduleDir.isEmpty() && ffplay.startsWith(m_moduleDir + QStringLiteral("/bin/")))
+        env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse"));
     if (onion) {
 #ifdef __APPLE__
         // macOS: torsocks (LD_PRELOAD) is unusable under SIP. Route .onion playback through a local privoxy
