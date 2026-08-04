@@ -5,8 +5,13 @@ A lightweight **listen-only** Logos Basecamp module: discover decentralized radi
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
 the delivery client lives in the **ui-host** process. Interops with live `radio-basecamp` hosts.
 
-> **📦 Install:** grab the signed **[v0.2.8 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.2.8)**
-> (`receiver_ui-0.2.8-linux-amd64.lgx` + `-darwin-arm64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **📦 Install:** grab the signed **[v0.3.0 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.3.0)**
+> (`receiver_ui-0.3.0-linux-amd64.lgx` + `-darwin-arm64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **v0.3.0 — ZERO external installs (#75).** The receiver now ships its own playback helpers *inside* the
+> `.lgx` (`ffplay` + `tor` + `privoxy` + Linux `libtorsocks`/`libpulse`), relocatable and preferred over
+> anything on your system, on **both Linux and macOS**. No more `brew`/`apt install ffmpeg tor` — public and
+> `.onion` stations play out of the box (audio: pulse→alsa on Linux, CoreAudio on macOS). The old deps card
+> stays as a fallback, and `RECEIVER_*_BIN` still overrides. Verified end-to-end on Linux + an M1.
 > **v0.2.8** makes the macOS deps-card `brew install` **non-interactive + stdin-detached (#68)** — pasting the
 > block no longer errors "Invalid input" when Homebrew has pending upgrades.
 > **v0.2.7** adds **private streams** — tune into an encrypted station with just its **Title + passphrase**
@@ -37,6 +42,11 @@ the delivery client lives in the **ui-host** process. Interops with live `radio-
 > `delivery_module` is pulled in automatically as a dependency.
 
 ### 2. Install external runtime dependencies (in a terminal)
+
+> **v0.3.0+ bundles these — this whole step is now OPTIONAL.** The signed `.lgx` ships `ffplay` + `tor` +
+> `privoxy` (+ the SOCKS shim) inside the module and prefers them, so a fresh install just plays. Install
+> the system tools below only if you want to override the bundle (set `RECEIVER_*_BIN`), or on an
+> unusual host (pure-ALSA, no pulse). The dependency card self-clears when the bundle is present.
 
 `.onion` playback needs **Tor**, **ffmpeg** (`ffplay`), and a SOCKS shim on your `PATH`.
 
@@ -165,7 +175,7 @@ from the in-app **Package Manager** (delivery_module **0.1.3**). Then install th
 ```bash
 PROF="$HOME/Library/Application Support/Logos/LogosBasecamp"
 lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-     install --file receiver_ui-0.2.8-darwin-arm64.lgx
+     install --file receiver_ui-0.3.0-darwin-arm64.lgx
 printf darwin-arm64 > "$PROF/plugins/receiver_ui/variant"
 ```
 Build that darwin `.lgx` with `nix build .#lgx-portable` on an Apple-Silicon Mac (secp256k1 + tor helpers
@@ -192,11 +202,11 @@ export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
 PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
 # 3. Install the SIGNED LGX from the v0.2.8 release (✓ Signed by xAlisher — no --allow-unsigned).
-curl -fL -o receiver_ui-0.2.8-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.2.8/receiver_ui-0.2.8-linux-amd64.lgx
+curl -fL -o receiver_ui-0.3.0-linux-amd64.lgx \
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.3.0/receiver_ui-0.3.0-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-        install --file receiver_ui-0.2.8-linux-amd64.lgx
+        install --file receiver_ui-0.3.0-linux-amd64.lgx
 printf 'linux-amd64' > "$PROF/plugins/receiver_ui/variant"   # select the variant
 #   (or build from source instead of downloading: nix build .#lgx-portable — see "Build from source")
 
