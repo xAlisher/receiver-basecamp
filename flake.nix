@@ -17,8 +17,11 @@
 
   outputs = inputs@{ logos-module-builder, nixpkgs-2405, ... }:
     let
-      # Bundle is x86_64-linux only for now; darwin-arm64 (@loader_path + CoreAudio) is #78.
-      pkgs2405 = nixpkgs-2405.legacyPackages.x86_64-linux;
+      # Build the helper bundle for the HOST system (each dev/release build is single-system, so
+      # `builtins.currentSystem` is right — build with `--impure`). Linux → ffplay+tor+privoxy+libpulse+
+      # libtorsocks ($ORIGIN); darwin → ffplay+tor+privoxy (@loader_path, CoreAudio) — see helper-bundle.nix.
+      system = builtins.currentSystem;
+      pkgs2405 = nixpkgs-2405.legacyPackages.${system};
       ffplayMin = import ./nix/ffplay-min-fn.nix { inherit (pkgs2405) ffmpeg; };
       helperBundle = pkgs2405.callPackage ./nix/helper-bundle.nix { inherit ffplayMin; };
     in

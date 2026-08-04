@@ -23,6 +23,10 @@
 #include <csignal>   // #52 kill()/SIGKILL to reap orphaned tor listeners by PID
 #include <QTimer>
 #include <QUrl>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>   // #78 _dyld_image_count/_dyld_get_image_name → module dir (no dladdr)
+#include <cstring>         // std::strstr
+#endif
 
 namespace {
 constexpr int    kTtlMs       = 45000;   // drop a station after 45s without a heartbeat (3 missed beats)
@@ -79,10 +83,16 @@ QString findModuleDir() {
             }
         }
     }
+#elif defined(__APPLE__)
+    // macOS: walk the dyld image list for the loaded plugin dylib and take its dir. Not dladdr (same
+    // GLIBC_2.34 caution as Linux) — _dyld_get_image_name is a plain libSystem call, always present.
+    for (uint32_t i = 0, n = _dyld_image_count(); i < n; ++i) {
+        const char* name = _dyld_get_image_name(i);
+        if (name && (std::strstr(name, "receiver_ui_plugin") || std::strstr(name, "receiver_ui_replica_factory")))
+            return QFileInfo(QString::fromUtf8(name)).absolutePath();
+    }
 #endif
-    // macOS dyld branch is added at the darwin-build step (#75); until then this returns "" on mac
-    // and resolveBin falls back to env/PATH (the deps-card path), i.e. no behaviour change there.
-    return QString();
+    return QString();   // unknown module dir → resolveBin falls back to env/PATH (the deps-card path)
 }
 
 // Spawned system binaries (tor/ffplay/torsocks) must NOT inherit the AppImage's LD_LIBRARY_PATH/
