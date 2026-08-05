@@ -315,6 +315,8 @@ void ReceiverUiBackend::onContextReady()
     // connectionStateChanged that delivery emits DURING createNode reenters this single ui-host thread
     // while it's blocked on createNode's reply → deadlock (sync-ipc-reentrancy). See wireDeliveryEvents().
     diag(QStringLiteral("onContextReady: modules() wired"));
+    reapOrphans();   // #84/#51/#10/#2 clean up a prior crashed session's leaked tor listener + ffplay,
+                     // BEFORE we spawn our own — frees stuck SOCKS ports so the first Play works.
     StationCrypto::init();   // #69 libsodium — init before any private-stream topic/key/decrypt op
     diag(QStringLiteral("private-stream crypto selftest: %1").arg(StationCrypto::selfTest() ? "OK" : "FAIL"));
     publishDeps();   // #55 re-publish now the QML replica is connected (constructor-time set can precede remoting)
@@ -1089,6 +1091,70 @@ QString ReceiverUiBackend::clearCache()
 }
 
 // #52 Reap leaked receiver_ui Tor listeners. Every Play spawns a `torlisten-<hex>` tor holding a SOCKS port
+// #84/#51/#10/#2 Reap ORPHANED helpers left by a crashed/force-quit prior session — a leaked tor
+// listener keeps holding its SOCKS port (next Play → "port in use"), a leaked ffplay keeps streaming
+// with no window. Runs at startup (onContextReady), before we spawn anything of our own.
+//
+// SAFE by two guards: (1) ORPHAN = the parent is not a live receiver ui-host. A live session's tor/ffplay
+// are children of the ui-host that spawned them, so a helper whose parent IS a `ui-host` is active (ours or
+// another running Basecamp instance) → spared. A crashed session's helper reparents to init/launchd (PPid 1)
+// OR — on a systemd user session — to the `systemd --user` subreaper (so PPid is NOT always 1); either way
+// its parent is not a ui-host → reaped. (2) argv0/comm must be the real tor/ffplay binary — never SIGKILL a
+// shell/agent that merely references the marker path (the pkill -f self-match footgun). Markers: the
+// torlisten dir path (tor) and our distinctive -cookies "cookieCheck=1" arg (ffplay).
+void ReceiverUiBackend::reapOrphans()
+{
+    const QByteArray torMarker = QByteArrayLiteral("receiver_ui/torlisten-");
+    const QByteArray ffMarker  = QByteArrayLiteral("cookieCheck=1");   // startFfplay always passes this
+    int reaped = 0;
+#if defined(__linux__)
+    auto isOrphan = [](int ppid) -> bool {                 // parent is not a live ui-host?
+        if (ppid <= 1) return true;                        // reparented to init → orphan
+        QFile c(QStringLiteral("/proc/%1/comm").arg(ppid));
+        if (!c.open(QIODevice::ReadOnly)) return true;     // parent already gone → orphan
+        return !c.readAll().contains("ui-host");           // parent is systemd/shell/etc → orphan; ui-host → live
+    };
+    const QDir proc(QStringLiteral("/proc"));
+    for (const QString& pid : proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        bool ok = false; const int p = pid.toInt(&ok); if (!ok) continue;
+        QFile stf(QStringLiteral("/proc/%1/status").arg(pid));
+        if (!stf.open(QIODevice::ReadOnly)) continue;
+        const QByteArray status = stf.readAll(); stf.close();
+        const int idx = status.indexOf("\nPPid:");
+        if (idx < 0 || !isOrphan(status.mid(idx + 6, 16).trimmed().toInt())) continue;   // live session → skip
+        QFile cf(QStringLiteral("/proc/%1/cmdline").arg(pid));
+        if (!cf.open(QIODevice::ReadOnly)) continue;
+        const QByteArray cmd = cf.readAll(); cf.close();
+        const QByteArray argv0 = cmd.left(cmd.indexOf('\0'));
+        const bool leakedTor    = cmd.contains(torMarker) && (argv0 == "tor"    || argv0.endsWith("/tor"));
+        const bool leakedFfplay = cmd.contains(ffMarker)  && (argv0 == "ffplay" || argv0.endsWith("/ffplay"));
+        if (!leakedTor && !leakedFfplay) continue;
+        ::kill(p, SIGKILL); ++reaped;
+    }
+#elif defined(__APPLE__)
+    // mac has no /proc → pgrep -f each marker, then confirm the parent isn't a live ui-host + it's the real binary.
+    auto commOf = [](int pid) -> QByteArray {
+        QProcess ps; ps.start(QStringLiteral("ps"), {QStringLiteral("-p"), QString::number(pid), QStringLiteral("-o"), QStringLiteral("comm=")});
+        ps.waitForFinished(2000); return ps.readAllStandardOutput().trimmed();
+    };
+    for (const QByteArray& marker : { torMarker, ffMarker }) {
+        QProcess pg; pg.start(QStringLiteral("pgrep"), {QStringLiteral("-f"), QString::fromUtf8(marker)});
+        pg.waitForFinished(3000);
+        for (const QByteArray& line : pg.readAllStandardOutput().split('\n')) {
+            bool ok = false; const int p = line.trimmed().toInt(&ok); if (!ok) continue;
+            if (!(commOf(p).endsWith("tor") || commOf(p).endsWith("ffplay"))) continue;   // real tor/ffplay only
+            QProcess pp; pp.start(QStringLiteral("ps"), {QStringLiteral("-p"), QString::number(p), QStringLiteral("-o"), QStringLiteral("ppid=")});
+            pp.waitForFinished(2000);
+            const int ppid = pp.readAllStandardOutput().trimmed().toInt();
+            if (ppid > 1 && commOf(ppid).contains("ui-host")) continue;   // parent is a live ui-host → active, spare it
+            ::kill(p, SIGKILL); ++reaped;
+        }
+    }
+#endif
+    if (reaped) { diag(QStringLiteral("reapOrphans: killed %1 orphaned helper(s) at startup").arg(reaped));
+                  log(QStringLiteral("cleaned up %1 leftover helper(s) from a previous session").arg(reaped)); }
+}
+
 // (9250–9253); a crash or an abandoned session leaves it running, so the next Play hits "port in use" /
 // can't connect. This kills THIS instance's listener + any ORPHANED torlisten-* daemon (from dead or other
 // instances), clears their /tmp dirs, and respawns a fresh one so the next Play works immediately.
