@@ -288,15 +288,6 @@ on 295: use the deferred build (stable hung process) and match the ui-host by it
 it's exec'd via `ld-linux`, so `comm`/`/proc/pid/exe` point at the loader, not `.ui-host.elf`. A full
 gdb backtrace needs `kernel.yama.ptrace_scope=0` (root); the kernel `wchan` needs neither.
 
-## Platform / arch support
-
-- **linux-amd64** — prebuilt LGX: `dist/receiver_ui-0.1.0-linux-amd64.lgx` (direct ui-host consumer;
-  **works on the current `v0.2.0` build** — the 268 pin is lifted, see "Platform status" above).
-- **macOS/arm64** — prebuilt **relay-architecture** pair: `dist/receiver_relay-0.1.0-darwin-arm64.lgx`
-  (core) + `dist/receiver_ui-0.1.0-darwin-arm64.lgx` (pure-QML). **Verified working end-to-end**
-  (discovery + `.onion` Tor playback) on a cpp-sdk ≥ #68 host — see the [macOS](#macos-arm64--verified-working-relay-architecture)
-  section. Install both with `variant = darwin-arm64`.
-
 ## Status & license
 
 Discovery + Tor playback validated **end-to-end** (discovers a live `radio-basecamp` station and plays
