@@ -1,0 +1,52 @@
+# #81 Quarterly reminder to review the bundled deps for CVEs. Deliberately NOT scraping upstream version
+# feeds (each tool's release source differs + breaks) — it surfaces the CURRENT bundled versions
+# (nix/bundled-versions.txt) + the advisory links so a human does the 10-minute check on a cadence.
+name: bundled-deps-watch
+
+on:
+  schedule:
+    - cron: '0 9 1 1,4,7,10 *'   # 09:00 UTC on the 1st of Jan/Apr/Jul/Oct (quarterly)
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open/refresh the bundled-deps review reminder
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          F=nix/bundled-versions.txt
+          get() { grep -E "^$1=" "$F" | head -1 | cut -d= -f2-; }
+          VERS=$(grep -vE '^\s*#|^\s*$' "$F" | sed 's/^/- `/; s/$/`/')
+          TITLE="Bundled-deps CVE review due (#81)"
+          BODY=$(cat <<EOF
+          Quarterly reminder (#81): review the **bundled** playback/privacy helpers for security updates.
+          We ship these inside the .lgx, so the distro does NOT patch them — we do.
+
+          **Currently shipped** (source: \`nix/bundled-versions.txt\`, pin \`$(get nixpkgs_pin) $(get nixpkgs_rev)\`, in \`$(get shipped_in)\`, last reviewed \`$(get last_reviewed)\`):
+          $VERS
+
+          **Check advisories (worst-first):**
+          - tor — https://blog.torproject.org/category/security-advisories/
+          - ffmpeg (only our enabled hls/aac/mp3/tls surface) — https://ffmpeg.org/security.html
+          - privoxy — https://www.privoxy.org/announce.txt
+
+          If any enabled component has a fix: bump the nixpkgs pin + re-bundle + re-release, then update
+          \`nix/bundled-versions.txt\`. Process: \`docs/BUNDLED-DEPS.md\`. Close this issue when the review is done.
+          EOF
+          )
+          EXISTING=$(gh issue list --search "$TITLE in:title state:open" --json number --jq '.[0].number' || true)
+          if [ -n "${EXISTING:-}" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+            echo "commented on #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label "security" 2>/dev/null \
+              || gh issue create --title "$TITLE" --body "$BODY"
+          fi

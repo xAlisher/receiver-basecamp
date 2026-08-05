@@ -1,0 +1,13 @@
+# Bundled runtime helpers shipped INSIDE the receiver .lgx (#75) — the receiver no longer relies on
+# OS-native (brew/apt) copies, so WE own their security updates (#81). This is the source of truth for
+# "what versions am I exposed to". Update it whenever you bump the nixpkgs pin + re-bundle + re-release
+# (see docs/BUNDLED-DEPS.md). The bundled-deps-watch workflow reads this file for the review reminder.
+nixpkgs_pin=nixos-24.05
+nixpkgs_rev=b134951a4c9f
+ffmpeg=6.1.2
+tor=0.4.8.13
+privoxy=3.0.34
+torsocks=2.4.0
+libpulse=17.0
+last_reviewed=2026-08-05
+shipped_in=v0.3.0
