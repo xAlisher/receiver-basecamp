@@ -77,6 +77,7 @@ private:
     QString startFfplay();
     void    retryOrStopPlayback(qint64 ranMs);   // ffplay self-exited: reap Tor + retry, or give up (#12)
     void    onNoAudioWatchdog();                 // ffplay running but silent → reap Tor + retry (#23)
+    void    reapOrphans();              // #84/#51/#10/#2 startup: SIGKILL orphaned (PPid==1) leaked tor listener + ffplay
     QString ensureTorListen();          // spawn a listener tor (SocksPort) for .onion playback
     void    killTorListen();
     QString ensurePlaybackProxy();      // #7 macOS: privoxy HTTP→SOCKS bridge (torsocks is SIP-blocked on mac)
