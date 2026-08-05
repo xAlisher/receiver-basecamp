@@ -20,6 +20,9 @@
       # Build the helper bundle for the HOST system (each dev/release build is single-system, so
       # `builtins.currentSystem` is right — build with `--impure`). Linux → ffplay+tor+privoxy+libpulse+
       # libtorsocks ($ORIGIN); darwin → ffplay+tor+privoxy (@loader_path, CoreAudio) — see helper-bundle.nix.
+      # NB: currentSystem makes this IMPURE (needs `--impure`) → the catalog CI can't auto-build → releases
+      # propagate to the catalog MANUALLY. Full explanation + the pure fix (builder PR #184, function
+      # postInstall) in docs/PACKAGING.md (#80). Switch to the function form once that upstream PR merges.
       system = builtins.currentSystem;
       pkgs2405 = nixpkgs-2405.legacyPackages.${system};
       ffplayMin = import ./nix/ffplay-min-fn.nix { inherit (pkgs2405) ffmpeg; };
