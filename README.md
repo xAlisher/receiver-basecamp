@@ -1,5 +1,8 @@
 # receiver-basecamp
 
+> This is a personal, experimental hobby project. It is not an official Logos product. Not audited.
+
+
 A lightweight **listen-only** Logos Basecamp module: discover decentralized radio broadcasts over
 **LogosMessaging** (`delivery_module`) and play them over Tor — no hosting, no MediaMTX, no hidden
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
