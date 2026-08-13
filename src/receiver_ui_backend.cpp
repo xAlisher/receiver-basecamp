@@ -353,24 +353,26 @@ QString ReceiverUiBackend::startDiscovery()
     if (!isContextReady()) return QStringLiteral("context_not_ready");
 
     if (!nodeReady()) {
-        // preset logos.dev + relay:true to interop with live radio-basecamp hosts (e.g. Sneg's
-        // "Logos manifesto"). The deployed logos.dev preset ships NO bootstrap nodes (observed
-        // bootstrapNodes=0 → currentPeerIds=[]), so supply the logos.dev entry nodes explicitly
-        // (these are the built-in logos.dev bootstrap multiaddrs — the same peers Sneg relays through).
-        QJsonArray entry{
-            QStringLiteral("/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby"),
-            QStringLiteral("/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH"),
-            QStringLiteral("/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397"),
-            QStringLiteral("/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH"),
-            QStringLiteral("/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP"),
-            QStringLiteral("/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE")
-        };
+        // #90 preset logos.test + relay:true to interop with live radio-basecamp hosts. We used to
+        // run logos.dev with six hardcoded bootstrap multiaddrs, because the deployed logos.dev
+        // preset ships NO bootstrap nodes (observed bootstrapNodes=0 → currentPeerIds=[]). That
+        // hardcoded list is exactly what rotted: the logos.dev fleet migrated Waku cluster 2 → 3
+        // (logos-messaging/logos-delivery#4114) and nwaku drops every peer whose cluster differs
+        // ("different clusterId reported: 2 vs 3"), so the node dialled fine and was disconnected
+        // milliseconds later — a total, silent outage on every platform.
+        //
+        // logos.test is the network upstream actually guarantees ("logos.dev is subtle to change at
+        // any moment" — logos-co/logos-delivery-module#84). It is on cluster 2, which is what we
+        // already send, so no clusterId override is needed. Crucially it SHIPS ITS OWN bootstrap
+        // nodes, so the entryNodes list goes away entirely and peer exchange works — measured over a
+        // 5m soak: 6/6 peers held, 0 cluster mismatches, 0 disconnects, 7 further peers discovered.
+        // Keep this preset in lockstep with booth-basecamp#72 — announcer and listener must sit on
+        // the same network or the directory is silently empty.
         QJsonObject cfg{
             {"logLevel", "INFO"},
             {"mode", "Core"},
-            {"preset", "logos.dev"},
-            {"relay", true},
-            {"entryNodes", entry}
+            {"preset", "logos.test"},
+            {"relay", true}
         };
         const QString cfgJson = QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
 
@@ -386,12 +388,11 @@ QString ReceiverUiBackend::startDiscovery()
         modules().delivery_module.createNodeAsync(cfgJson,
             [this](LogosResult r){ diag(QStringLiteral("createNodeAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
         setNodeReady(true);
-        const int entryCount = entry.size();
-        QTimer::singleShot(3000, this, [this, entryCount]{
+        QTimer::singleShot(3000, this, [this]{
             diag(QStringLiteral("fire startAsync + subscribe (context should exist by now)"));
             modules().delivery_module.startAsync(
                 [this](LogosResult r){ diag(QStringLiteral("startAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
-            log(QStringLiteral("delivery node up (logos.dev, %1 entry nodes, async fire-and-forget)").arg(entryCount));
+            log(QStringLiteral("delivery node up (logos.test, preset bootstrap, async fire-and-forget)"));
             subscribeTopic(directoryTopic());
             setDiscovering(true);
             if (connectionStatus() == QLatin1String("initializing"))
