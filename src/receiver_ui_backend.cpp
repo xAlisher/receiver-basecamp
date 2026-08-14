@@ -361,18 +361,34 @@ QString ReceiverUiBackend::startDiscovery()
         // ("different clusterId reported: 2 vs 3"), so the node dialled fine and was disconnected
         // milliseconds later — a total, silent outage on every platform.
         //
-        // logos.test is the network upstream actually guarantees ("logos.dev is subtle to change at
-        // any moment" — logos-co/logos-delivery-module#84). It is on cluster 2, which is what we
-        // already send, so no clusterId override is needed. Crucially it SHIPS ITS OWN bootstrap
-        // nodes, so the entryNodes list goes away entirely and peer exchange works — measured over a
-        // 5m soak: 6/6 peers held, 0 cluster mismatches, 0 disconnects, 7 further peers discovered.
-        // Keep this preset in lockstep with booth-basecamp#72 — announcer and listener must sit on
-        // the same network or the directory is silently empty.
+        // We target the logos.test fleet — the network upstream actually guarantees ("logos.dev is
+        // subtle to change at any moment" — logos-co/logos-delivery-module#84).
+        //
+        // #94 BUT DO NOT ask for it by preset name. v0.4.0 sent {"preset":"logos.test"} and was
+        // dead on a stock install: the delivery_module the package manager resolves (v1.1.0) has
+        // ONLY logos.dev compiled in, so createNode is rejected outright —
+        //   CreateNodeRequest failed  err="Invalid --preset value passed: logos.test"
+        // — and no node is ever built (silent: an amber pill that never resolves). Only a dev-era
+        // v0.2.0 module knows the name, which is what v0.4.0 was mistakenly validated against.
+        //
+        // logos.test sits on cluster 2 — the SAME cluster the logos.dev preset selects — so naming
+        // logos.dev and dialling the logos.test peers explicitly reaches the right fleet on EVERY
+        // delivery_module, old or new, with no clusterId override. The entry list is the cost of
+        // that portability; it is the current logos.test fleet, not the migrated logos.dev boxes.
+        QJsonArray entry{
+            QStringLiteral("/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj"),
+            QStringLiteral("/dns4/node-02.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmB8NYprrfQrgWVzsJtYWkfjsXbmJEGNMG6othXsQ53BwG"),
+            QStringLiteral("/dns4/node-01.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmF8WtwGPmeGHgYAX2277jHgy5cW9F7zsB8EqUjBZQAZQ3"),
+            QStringLiteral("/dns4/node-02.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmUuXhUW9bdJpzN1kfDziFiUZo4bszTk66cvr7uuyCHXR7"),
+            QStringLiteral("/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF"),
+            QStringLiteral("/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV")
+        };
         QJsonObject cfg{
             {"logLevel", "INFO"},
             {"mode", "Core"},
-            {"preset", "logos.test"},
-            {"relay", true}
+            {"preset", "logos.dev"},   // cluster 2 — the name every module has; peers below decide the fleet
+            {"relay", true},
+            {"entryNodes", entry}
         };
         const QString cfgJson = QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
 
@@ -392,7 +408,7 @@ QString ReceiverUiBackend::startDiscovery()
             diag(QStringLiteral("fire startAsync + subscribe (context should exist by now)"));
             modules().delivery_module.startAsync(
                 [this](LogosResult r){ diag(QStringLiteral("startAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
-            log(QStringLiteral("delivery node up (logos.test, preset bootstrap, async fire-and-forget)"));
+            log(QStringLiteral("delivery node up (logos.test fleet via explicit peers, async fire-and-forget)"));
             subscribeTopic(directoryTopic());
             setDiscovering(true);
             if (connectionStatus() == QLatin1String("initializing"))

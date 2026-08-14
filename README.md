@@ -8,15 +8,22 @@ A lightweight **listen-only** Logos Basecamp module: discover decentralized radi
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
 the delivery client lives in the **ui-host** process. Interops with live `radio-basecamp` hosts.
 
-> **📦 Install:** grab the signed **[v0.4.0 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.4.0)**
-> (`receiver_ui-0.4.0-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **📦 Install:** grab the signed **[v0.4.1 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.4.1)**
+> (`receiver_ui-0.4.1-linux-amd64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
 > macOS is still on **v0.3.0** (`-darwin-arm64.lgx`) until the arm64 build lands — see [#90](https://github.com/xAlisher/receiver-basecamp/issues/90).
-> **v0.4.0 — REQUIRED network fix (#90).** The `logos.dev` delivery fleet migrated Waku **cluster 2 → 3**, and
-> nwaku drops every peer whose cluster differs — so older builds dial successfully, are disconnected
-> milliseconds later, and sit at a red **Disconnected** pill with an empty station list, on every platform.
-> Receiver now uses the **`logos.test`** network (the one upstream guarantees) and no longer hardcodes
-> bootstrap peers at all: that preset ships its own, so peer exchange works and there is no address list left
-> to go stale. **Anything older than v0.4.0 cannot discover stations** — and the broadcaster must move too
+> **v0.4.1 — REQUIRED network fix (#90, #94).** After installing you MUST fully quit and
+> reopen Basecamp: `delivery_module` builds its Waku node once per process, so a running
+> instance keeps the old network and the pill never turns green.
+> The `logos.dev` delivery fleet migrated Waku **cluster 2 → 3**, and nwaku drops every peer whose
+> cluster differs — so older builds dial successfully, are disconnected milliseconds later, and sit at a
+> red **Disconnected** pill with an empty station list, on every platform.
+> Receiver now targets the **`logos.test`** fleet (the one upstream guarantees). It asks for it by
+> **explicit peer addresses**, not by preset name: `logos.test` is on cluster 2 — the same cluster the
+> `logos.dev` preset selects — so this reaches the right fleet on *every* `delivery_module`.
+> **v0.4.0 must be skipped**: it named the `logos.test` preset, which the `delivery_module` the package
+> manager actually resolves (v1.1.0) does not have, so `createNode` was rejected and no node was ever
+> built — an amber pill that never resolves ([#94](https://github.com/xAlisher/receiver-basecamp/issues/94)).
+> **Anything older than v0.4.1 cannot discover stations** — and the broadcaster must move too
 > (booth-basecamp **v0.2.3+**), or the directory stays empty.
 > **v0.3.0 — ZERO external installs (#75).** The receiver ships its own playback helpers *inside* the
 > `.lgx` (`ffplay` + `tor` + `privoxy` + Linux `libtorsocks`/`libpulse`), relocatable and preferred over
@@ -212,12 +219,12 @@ sudo apt install -y tor torsocks ffmpeg
 export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
 PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
-# 3. Install the SIGNED LGX from the v0.4.0 release (✓ Signed by xAlisher — no --allow-unsigned).
-curl -fL -o receiver_ui-0.4.0-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.4.0/receiver_ui-0.4.0-linux-amd64.lgx
+# 3. Install the SIGNED LGX from the v0.4.1 release (✓ Signed by xAlisher — no --allow-unsigned).
+curl -fL -o receiver_ui-0.4.1-linux-amd64.lgx \
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.4.1/receiver_ui-0.4.1-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-        install --file receiver_ui-0.4.0-linux-amd64.lgx
+        install --file receiver_ui-0.4.1-linux-amd64.lgx
 printf 'linux-amd64' > "$PROF/plugins/receiver_ui/variant"   # select the variant
 #   (or build from source instead of downloading: nix build .#lgx-portable — see "Build from source")
 
