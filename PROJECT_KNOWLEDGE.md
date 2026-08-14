@@ -324,3 +324,62 @@ tweak) → skill `qml-hot-swap-installed-plugin`.
 - **WIN — stopped at the SemVer wall and got the version-scheme decision from Alisher** instead of unilaterally
   re-versioning or hacking the shared catalog CI. The `module-version-convention` skill's own pre-written Caveat
   had predicted this exact failure and named the fix (`0.2.<n>`).
+
+## #90/#94/#96 fleet-migration outage + the v0.4.0 regression (retro 2026-08-14)
+
+The longest single debugging session this repo has had. Four distinct faults stacked, and the reason it
+took hours was **observability**, not difficulty — every layer failed silently.
+
+### The outage (external, not our bug)
+The `logos.dev` delivery fleet migrated Waku **cluster 2 → 3** (`logos-messaging/logos-delivery#4114`),
+rolling from 2026-08-08 23:28 CEST and complete by 08-10 13:45. nwaku's peer_manager hard-drops any peer
+whose cluster differs, so all six hardcoded entry nodes were dialled *successfully* and disconnected
+milliseconds later (`different clusterId reported: 2 vs 3`) → `totalConnections=0/150`, red pill, on mac
+and Linux simultaneously. **DNS and TCP both look perfectly healthy**, which is what makes this confusing:
+resolve the hosts, connect to :30303, everything passes — and the node still has zero peers.
+
+Diagnostic order that works: grep the Basecamp log for `different clusterId` *before* suspecting anything
+local. Blast radius is every module hardcoding the preset, so broadcaster and listener must move together
+or the directory is silently empty.
+
+### The fix, and the wrong first version
+`logos.test` is the network upstream guarantees ("logos.dev is subtle to change at any moment" —
+logos-co/logos-delivery-module#84) and is on **cluster 2**, the same cluster `logos.dev` selects.
+
+v0.4.0 asked for it **by preset name** and was dead on every stock install: the `delivery_module` the
+package manager resolves (v1.1.0) has only `logos.dev` compiled into `liblogosdelivery.so`, so
+`createNode` was rejected (`Invalid --preset value passed: logos.test`), no node was created, and the pill
+sat amber with **no cluster mismatch to explain it**. v0.4.1 names `logos.dev` and picks the fleet with
+explicit `logos.test` `entryNodes` — portable across every delivery_module build. Pinning "a newer
+delivery_module" is not a fix and is not even expressible: the resolver's `1.1.0` sorts *newer* than the
+`0.2.0` that has the preset.
+
+### Why it was invisible (the real cost)
+- A `ui_qml` module's `qInfo`/`log()` reaches **no** Basecamp log — verified, zero `[*_ui]` lines for any
+  module — so every early-return in `ingestAnnounce` was silent.
+- All receivers appended to one `/tmp/receiver-diag.log`; with three running the trail is unattributable.
+- v0.4.2 fixes both: every drop path diag'd with its reason, an `ingest ok` line, a `publishStations`
+  summary (count + `publicTopic` + per-station topic, so a *filter* problem is distinguishable from an
+  *ingest* problem), and a per-instance diag file. One line then answered it:
+  `ingest ok: "Parallel Society Radio" verified=yes topic=/radio-basecamp/1/directory/json`.
+
+### Operational rules learned
+- **`createNode` is once per delivery_module PROCESS** (`createNode rejected - context already
+  initialized`). Installing a network change into a running Basecamp does nothing — full quit + relaunch
+  is mandatory and belongs in every release note.
+- **Run one Basecamp at a time.** Two instances with empty `LOGOS_INSTANCE_ID` share the IPC socket
+  namespace; you can end up staring at a Receiver that isn't the instance doing discovery. This, not a
+  code bug, is what "updated, restarted, still no station" turned out to be.
+- **The M1 is SSH-reachable (`m1`, user `sher`) — mac builds are NOT wetware.** `nix build
+  .#lgx-portable --impure` there (never `.#lgx`), sign on the Linux box, `lgx merge` the two into one
+  multi-variant package for the catalog.
+- Deleting an iso tree needs `chmod -R u+w` first — `cp -a` preserves nix-store read-only bits and `rm`
+  silently half-fails.
+
+### Process fail worth keeping
+v0.4.0 was validated against the `delivery_module` that happened to be on the dev box (v0.2.0, which has
+`logos.test`), not against what a stock install resolves. It passed every check here and was broken for
+every user. **Validate a delivery config against the module a stock install gets** — copy the real one
+into a logoscore harness and assert `createNode` returns success. The identical lesson had already been
+learned hours earlier on Sneg (dial peers explicitly rather than trust a preset) and was not carried
+across; that is the actual root cause of the regression.
