@@ -46,8 +46,22 @@ const char* const kDirTopic    = "/radio-basecamp/1/directory/json";
 
 // File diagnostic — ui-host child stderr/qInfo is swallowed (#163), so write a timestamped trail to
 // a file we can read out-of-band. TEMP instrumentation for the spinner/discovery investigation.
+// #96 per-INSTANCE path. Every receiver on the box used to append to one /tmp/receiver-diag.log, so
+// with a second Basecamp (or a test instance) running you cannot tell whose line is whose — during the
+// #96 hunt three receivers interleaved into one file and made the trail unreadable. LOGOS_INSTANCE_ID
+// is what namespaces an isolated instance, so scope the file by it; the plain path stays the default
+// so existing docs/greps keep working for a single install.
+static QString diagPath() {
+    static const QString p = [] {
+        const QByteArray id = qgetenv("LOGOS_INSTANCE_ID");
+        return id.isEmpty() ? QStringLiteral("/tmp/receiver-diag.log")
+                            : QStringLiteral("/tmp/receiver-diag-%1.log").arg(QString::fromUtf8(id));
+    }();
+    return p;
+}
+
 void diag(const QString& m) {
-    QFile f(QStringLiteral("/tmp/receiver-diag.log"));
+    QFile f(diagPath());
     if (f.open(QIODevice::Append | QIODevice::WriteOnly)) {
         f.write((QDateTime::currentDateTime().toString("HH:mm:ss.zzz") + "  " + m + "\n").toUtf8());
         f.close();
@@ -494,7 +508,13 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         const QByteArray raw = payload.toByteArray();
         if (raw.trimmed().startsWith('{')) json = raw;
     }
-    if (json.isEmpty()) return;
+    // #96 EVERY drop below is diag'd. A ui_qml module's qInfo/log() is NOT captured in the Basecamp
+    // log (verified: zero "[*_ui]" lines for any module), so a silently-dropped announce is otherwise
+    // invisible — "messages arrive, no station appears" with nothing anywhere to say why. diag() goes
+    // to /tmp/receiver-diag.log, which is the only channel we can actually read back.
+    // NOTE: the delivery event carries 4 entries and only one is the payload, so a couple of
+    // "not_json" lines per announce are NORMAL — judge by whether an "ingest ok" follows.
+    if (json.isEmpty()) { diag(QStringLiteral("ingest drop: not_json (len=%1)").arg(asStr.size())); return; }
 
     // #69 private streams: an encrypted announce arrives as a {pv,enc,n,ct} envelope. Try each private
     // stream's key (the AEAD tag identifies the right one, and fails closed for all others) — on success
@@ -506,13 +526,13 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         for (auto it = m_privStreams.constBegin(); it != m_privStreams.constEnd(); ++it) {
             if (StationCrypto::decryptAnnounce(it.value().key, env, it.value().seg, plain)) { decrypted = true; break; }
         }
-        if (!decrypted) return;   // not for us / undecodable — drop silently
+        if (!decrypted) { diag(QStringLiteral("ingest drop: encrypted envelope, no matching key (%1 private streams known)").arg(m_privStreams.size())); return; }
         json = plain;
     }
 
     const QJsonObject o = QJsonDocument::fromJson(json).object();
     const QString name = o.value(QStringLiteral("name")).toString();
-    if (name.isEmpty()) return;
+    if (name.isEmpty()) { diag(QStringLiteral("ingest drop: no name field — keys=[%1]").arg(QStringList(o.keys()).join(QLatin1Char(',')))); return; }
 
     Station s;
     s.name      = name;
@@ -539,6 +559,8 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         signedObj.remove(QStringLiteral("sig"));
         const QByteArray canon = QJsonDocument(signedObj).toJson(QJsonDocument::Compact);
         if (!StationIdentity::verify(pubkey, sig, canon)) {
+            diag(QStringLiteral("ingest drop: BAD SIGNATURE for \"%1\" v=%2 pubkey=%3… canon=%4B")
+                     .arg(s.name).arg(ver).arg(pubkey.left(16)).arg(canon.size()));
             log("dropped forged announce for \"" + s.name + "\" (bad signature)");
             return;
         }
@@ -559,6 +581,8 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
     const QString key = s.topic + "|" + s.name;
     const bool isNew = !m_stations.contains(key);
     m_stations.insert(key, s);
+    diag(QStringLiteral("ingest ok: \"%1\" verified=%2 topic=%3 url=%4")
+             .arg(s.name).arg(s.verified ? "yes" : "no").arg(s.topic, s.streamUrl.left(40)));
     if (isNew) {
         log("discovered \"" + s.name + "\"");
         prewarm(s.streamUrl);   // #28 warm this onion's rendezvous circuit on discovery → fast first play (no hover)
@@ -597,6 +621,13 @@ void ReceiverUiBackend::publishStations()
         o["uptimeS"]   = (double)((now - s.lastSeenMs) / 1000);
         arr.append(o);
     }
+    // #96 the model contents + the topic the QML list filters on. If stations exist here but the list
+    // renders empty, the fault is the filter (publicTopic not replicated / topic mismatch), not ingest.
+    diag(QStringLiteral("publishStations: %1 station(s), publicTopic=\"%2\"%3")
+             .arg(arr.size()).arg(publicTopic(),
+                  arr.isEmpty() ? QString() : QStringLiteral(" topics=[%1]").arg([&]{
+                      QStringList t; for (const Station& st : m_stations) t << st.topic; return t.join(QLatin1Char(','));
+                  }())));
     setStationsJson(QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
     publishPinned();
 }

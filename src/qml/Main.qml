@@ -228,6 +228,10 @@ Item {
         var all
         try { all = JSON.parse(backend.stationsJson) } catch (e) { return [] }
         var at = root.activeTopic
+        // #96 fail OPEN, not closed. activeTopic is empty until backend.publicTopic replicates over
+        // QtRO; filtering on "" matched nothing, so every discovered station was hidden with no error
+        // anywhere — announces arriving, list stubbornly empty. An empty filter now means "no filter".
+        if (!at || at.length === 0) return all
         return all.filter(function(s) { return (s.topic || "") === at })
     }
     // #14 pinned stations (by pubkey), online/offline — survives reload
