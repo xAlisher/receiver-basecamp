@@ -8,8 +8,12 @@ A lightweight **listen-only** Logos Basecamp module: discover decentralized radi
 service. It's a single **`ui_qml` module with a C++ backend** (the `logos-delivery-demo` shape), so
 the delivery client lives in the **ui-host** process. Interops with live `radio-basecamp` hosts.
 
-> **📦 Install:** grab the signed **[v0.4.3 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.4.3)**
-> (`receiver_ui-0.4.3-linux-amd64.lgx` + `-darwin-arm64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **📦 Install:** grab the signed **[v0.5.0 release](https://github.com/xAlisher/receiver-basecamp/releases/tag/v0.5.0)**
+> (`receiver_ui-0.5.0-linux-amd64.lgx` + `-darwin-arm64.lgx`, ✓ Signed by xAlisher) — see [Quick start](#quick-start-cold-agent-linux-x86-64).
+> **v0.5.0 — real `logos.test` preset + automatic fallback.** On delivery 0.3.0 Receiver joins the logos.test fleet through
+> the official preset (RLN on; listening needs **no membership**, no RLN modules). Older deliveries (0.2.x, third-party
+> 0.9.0) reject that config cleanly and Receiver falls back to the legacy `logos.dev + clusterId 2` node. Verified on
+> macOS/0.3.0 (station in 7.7 s) and Linux/0.9.0 (fallback, 32 s). After installing, **fully quit and reopen Basecamp**.
 > **v0.4.3 — finds stations on Basecamp 0.3.x + full-tile icon.** Basecamp 0.3.x ships delivery_module 0.3.0, where
 > the `logos.dev` preset is Waku **cluster 3**, so v0.4.2's "logos.dev + logos.test peers" config was a cluster
 > mismatch there. v0.4.3 pins **`clusterId: 2`** (the logos.test fleet, same as Booth v0.2.4+) and uses OS-assigned
@@ -197,7 +201,7 @@ from the in-app **Package Manager** (delivery_module **0.1.3**). Then install th
 ```bash
 PROF="$HOME/Library/Application Support/Logos/LogosBasecamp"
 lgpm --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-     install --file receiver_ui-0.4.3-darwin-arm64.lgx
+     install --file receiver_ui-0.5.0-darwin-arm64.lgx
 printf darwin-arm64 > "$PROF/plugins/receiver_ui/variant"
 ```
 Build that darwin `.lgx` with `nix build .#lgx-portable` on an Apple-Silicon Mac (secp256k1 + tor helpers
@@ -223,12 +227,12 @@ sudo apt install -y tor torsocks ffmpeg
 export XDG_DATA_HOME="$HOME/.local/share/Logos-radio-only"
 PROF="$XDG_DATA_HOME/Logos/LogosBasecamp"
 
-# 3. Install the SIGNED LGX from the v0.4.3 release (✓ Signed by xAlisher — no --allow-unsigned).
-curl -fL -o receiver_ui-0.4.3-linux-amd64.lgx \
-  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.4.3/receiver_ui-0.4.3-linux-amd64.lgx
+# 3. Install the SIGNED LGX from the v0.5.0 release (✓ Signed by xAlisher — no --allow-unsigned).
+curl -fL -o receiver_ui-0.5.0-linux-amd64.lgx \
+  https://github.com/xAlisher/receiver-basecamp/releases/download/v0.5.0/receiver_ui-0.5.0-linux-amd64.lgx
 LGPM=$(command -v lgpm || echo /path/to/lgpm)   # logos-package-manager CLI
 "$LGPM" --modules-dir "$PROF/modules" --ui-plugins-dir "$PROF/plugins" \
-        install --file receiver_ui-0.4.3-linux-amd64.lgx
+        install --file receiver_ui-0.5.0-linux-amd64.lgx
 printf 'linux-amd64' > "$PROF/plugins/receiver_ui/variant"   # select the variant
 #   (or build from source instead of downloading: nix build .#lgx-portable — see "Build from source")
 
