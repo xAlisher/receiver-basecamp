@@ -1,3 +1,4 @@
+#include <memory>
 #include "receiver_ui_backend.h"
 #include "station_identity.h"  // #13 verify announce signatures (secp256k1)
 #include "station_crypto.h"    // #69 private streams: hash(Title+Pass) topic + decrypt with Pass
@@ -414,7 +415,21 @@ QString ReceiverUiBackend::startDiscovery()
             {"relay", true},
             {"entryNodes", entry}
         };
-        const QString cfgJson = QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
+        const QString legacyCfgJson = QString::fromUtf8(QJsonDocument(cfg).toJson(QJsonDocument::Compact));
+
+        // #105 Prefer the REAL logos.test preset (cluster 2, RLN on). A listener needs no membership
+        // (logos-delivery-module#151): verified 2026-10-05 on delivery 0.3.0 that a logos.test node
+        // starts and receives Booth's announces both WITH the RLN modules (rlnState Ready) and
+        // WITHOUT them (rlnState reports the start failure, node runs anyway). The layered shape is
+        // what 0.3.0 wants, and it survives the coming removal of "logos.dev + clusterId" (0.9.0 warns).
+        // Older deliveries (0.2.x, vpavlin's 0.9.0 = 0.1.4 code) REJECT this shape cleanly —
+        // createNode fails, no context is left behind — so we then fall back to legacyCfgJson.
+        const QJsonObject testCfg{
+            {"mode", "Core"},
+            {"preset", "logos.test"},
+            {"messagingOverrides", QJsonObject{{"tcp-port", 0}, {"discv5-udp-port", 0}}}
+        };
+        const QString testCfgJson = QString::fromUtf8(QJsonDocument(testCfg).toJson(QJsonDocument::Compact));
 
         // #20 FIX — FIRE-AND-FORGET async. Headless findings:
         //  - SYNC createNode() deadlocks: blocks the single ui-host thread; delivery's reply needs that
@@ -424,23 +439,50 @@ QString ReceiverUiBackend::startDiscovery()
         // So don't rely on the reply/callback at all: fire createNode, then fire start after a short
         // delay (so the context exists — the reply that would sequence them isn't coming), then subscribe.
         // The node comes up from the sends; discovery rides delivery's event-PUSH (.on) path.
-        diag(QStringLiteral("startDiscovery: createNodeAsync (fire-and-forget — sync deadlocks + async reply undelivered, #20)"));
-        modules().delivery_module.createNodeAsync(cfgJson,
-            [this](LogosResult r){ diag(QStringLiteral("createNodeAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
+        // #105 Bring-up runs ONCE, after whichever createNode produced the context. The reply
+        // callback is delivered on current hosts (seen on 0.3.0 and 0.9.0, up to ~13 s late), but #20
+        // showed it can go missing, so a 20 s timer fires the legacy config anyway. That is harmless
+        // when the logos.test node already exists: a second createNode is rejected ("context already
+        // initialized") and the running node is untouched.
+        auto brought = std::make_shared<bool>(false);
+        auto bringUp = [this, brought](const QString& network) {
+            if (*brought) return;
+            *brought = true;
+            QTimer::singleShot(3000, this, [this, network]{
+                diag(QStringLiteral("fire startAsync + subscribe (%1)").arg(network));
+                modules().delivery_module.startAsync(
+                    [this](LogosResult r){ diag(QStringLiteral("startAsync cb: ok=%1").arg(r.success)); }, Timeout());
+                log(QStringLiteral("delivery node up (%1)").arg(network));
+                subscribeTopic(directoryTopic());
+                setDiscovering(true);
+                if (connectionStatus() == QLatin1String("initializing"))
+                    setConnectionStatus(QStringLiteral("connecting"));
+                log("discovering on " + directoryTopic());
+                wireDeliveryEvents();
+            });
+        };
+        auto fallBack = [this, legacyCfgJson, bringUp](const QString& why) {
+            diag(QStringLiteral("logos.test preset not accepted (%1): legacy cluster-2 config").arg(why));
+            modules().delivery_module.createNodeAsync(legacyCfgJson,
+                [this, bringUp](LogosResult r){
+                    diag(QStringLiteral("legacy createNode cb: ok=%1").arg(r.success));
+                    bringUp(QStringLiteral("legacy logos.dev+clusterId 2"));
+                }, Timeout());
+        };
+        diag(QStringLiteral("startDiscovery: createNodeAsync logos.test preset"));
+        modules().delivery_module.createNodeAsync(testCfgJson,
+            [this, bringUp, fallBack](LogosResult r){
+                diag(QStringLiteral("logos.test createNode cb: ok=%1").arg(r.success));
+                if (r.success) bringUp(QStringLiteral("logos.test preset"));
+                else fallBack(QStringLiteral("createNode failed"));
+            }, Timeout());
         setNodeReady(true);
-        QTimer::singleShot(3000, this, [this]{
-            diag(QStringLiteral("fire startAsync + subscribe (context should exist by now)"));
-            modules().delivery_module.startAsync(
-                [this](LogosResult r){ diag(QStringLiteral("startAsync cb (if ever): ok=%1").arg(r.success)); }, Timeout());
-            log(QStringLiteral("delivery node up (logos.test fleet via explicit peers, async fire-and-forget)"));
-            subscribeTopic(directoryTopic());
-            setDiscovering(true);
-            if (connectionStatus() == QLatin1String("initializing"))
-                setConnectionStatus(QStringLiteral("connecting"));
-            log("discovering on " + directoryTopic());
-            wireDeliveryEvents();
+        QTimer::singleShot(20000, this, [brought, fallBack, bringUp]{
+            if (*brought) return;
+            fallBack(QStringLiteral("no createNode reply in 20 s"));
+            bringUp(QStringLiteral("legacy, reply-less host"));
         });
-        return QString();   // node bring-up continues on the timer above
+        return QString();   // node bring-up continues in bringUp()
     }
 
     // Already node-ready (re-entry, e.g. QML re-calls startDiscovery): just (re)subscribe + wire.
