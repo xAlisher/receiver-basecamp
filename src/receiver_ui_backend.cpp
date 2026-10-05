@@ -397,10 +397,20 @@ QString ReceiverUiBackend::startDiscovery()
             QStringLiteral("/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF"),
             QStringLiteral("/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV")
         };
+        //
+        // Pin clusterId=2 explicitly. delivery_module 0.3.0 (nwaku v0.39, the one Basecamp 0.3.x ships)
+        // moved the logos.dev PRESET to cluster 3, so "logos.dev + logos.test peers" became a cluster
+        // mismatch there (every peer dropped). Naming logos.dev keeps RLN off on every generation (the
+        // 0.3.0 logos.test preset gates start on an RLN membership); the override sets the cluster.
+        // Verified 2026-10-05 on delivery 0.2.3 (v0.38.1) and 0.3.0 (v0.39.0): cluster=2, live peer.
+        // Ports OS-assigned (0) so we never collide with another node on the box (fixed 60000 did).
         QJsonObject cfg{
             {"logLevel", "INFO"},
             {"mode", "Core"},
-            {"preset", "logos.dev"},   // cluster 2 — the name every module has; peers below decide the fleet
+            {"preset", "logos.dev"},   // RLN off everywhere; the cluster comes from clusterId below
+            {"clusterId", 2},          // logos.test fleet — same network as Booth (booth-basecamp)
+            {"tcpPort", 0},
+            {"discv5UdpPort", 0},
             {"relay", true},
             {"entryNodes", entry}
         };
