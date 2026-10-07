@@ -616,6 +616,21 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
             log("dropped forged announce for \"" + s.name + "\" (bad signature)");
             return;
         }
+        // #112 drop replays. Old announces (validly signed, minutes old) get re-gossiped once the relay's
+        // duplicate cache has forgotten them; taking the last-arrived one made now-playing flip every second
+        // between the current and earlier tracks (seen 2026-10-07: 42 announces in 45 s, seq 10792..10990
+        // interleaved). seq/startedAt are inside the verified bytes, so ordering can't be forged without the key.
+        // A Booth restart gets a new startedAt, so its seq starting over is still accepted.
+        s.startedAt = signedObj.value(QStringLiteral("startedAt")).toVariant().toLongLong();
+        s.seq       = signedObj.value(QStringLiteral("seq")).toVariant().toLongLong();
+        const QString stKey = s.topic + "|" + s.name;
+        const auto cur = m_stations.constFind(stKey);
+        if (cur != m_stations.constEnd() && cur->verified && cur->pubkey == pubkey && s.seq > 0
+            && (s.startedAt < cur->startedAt || (s.startedAt == cur->startedAt && s.seq <= cur->seq))) {
+            diag(QStringLiteral("ingest drop: stale/replayed announce for \"%1\" seq=%2 (have %3)")
+                     .arg(s.name).arg(s.seq).arg(cur->seq));
+            return;
+        }
         s.pubkey      = pubkey;
         s.fingerprint = StationIdentity::fingerprint(pubkey);
         s.keySource   = signedObj.value(QStringLiteral("keySource")).toString();  // #4 trusted (inside the verified bytes)

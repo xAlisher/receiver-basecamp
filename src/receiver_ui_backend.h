@@ -55,6 +55,8 @@ private:
         QString keySource;    // #4 "keycard" | "autogen" (from the signed announce) — drives the display
         bool    verified = false;
         qint64  lastSeenMs = 0;
+        qint64  startedAt = 0;  // #112 from the SIGNED announce: (startedAt, seq) orders announces per station
+        qint64  seq = 0;
     };
 
     void wireDeliveryEvents();                       // subscribe to delivery events AFTER createNode (reentrancy)
