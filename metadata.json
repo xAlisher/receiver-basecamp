@@ -11,6 +11,11 @@
   "dependencies": [
     "delivery_module"
   ],
+  "uses": [
+    {
+      "intent": "basecamp.notifications.post"
+    }
+  ],
   "codegen": {
     "rep": "src/receiver_ui.rep"
   },
