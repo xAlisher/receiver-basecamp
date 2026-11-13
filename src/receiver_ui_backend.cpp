@@ -623,14 +623,20 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         // A Booth restart gets a new startedAt, so its seq starting over is still accepted.
         s.startedAt = signedObj.value(QStringLiteral("startedAt")).toVariant().toLongLong();
         s.seq       = signedObj.value(QStringLiteral("seq")).toVariant().toLongLong();
-        const QString stKey = s.topic + "|" + s.name;
-        const auto cur = m_stations.constFind(stKey);
-        if (cur != m_stations.constEnd() && cur->verified && cur->pubkey == pubkey && s.seq > 0
-            && (s.startedAt < cur->startedAt || (s.startedAt == cur->startedAt && s.seq <= cur->seq))) {
-            diag(QStringLiteral("ingest drop: stale/replayed announce for \"%1\" seq=%2 (have %3)")
-                     .arg(s.name).arg(s.seq).arg(cur->seq));
+        // #114 compare against a per-station HIGH-WATER mark (pubkey + stream path), not the current list entry:
+        // the entry is pruned after 45 s and is keyed by name, so a replayed announce from an earlier session
+        // (e.g. before a rename) arrived "new" and brought the old name back every few minutes.
+        const QString hwKey = pubkey + QLatin1Char('|') + signedObj.value(QStringLiteral("path")).toString();
+        const auto hw = m_highWater.constFind(hwKey);
+        if (hw != m_highWater.constEnd() && s.seq > 0
+            && (s.startedAt < hw->first || (s.startedAt == hw->first && s.seq <= hw->second))) {
+            diag(QStringLiteral("ingest drop: stale/replayed announce for \"%1\" seq=%2 startedAt=%3 (have %4/%5)")
+                     .arg(s.name).arg(s.seq).arg(s.startedAt).arg(hw->second).arg(hw->first));
             return;
         }
+        if (m_highWater.size() > 2000) m_highWater.clear();   // bound memory; a reset only re-learns order
+        m_highWater.insert(hwKey, qMakePair(s.startedAt, s.seq));
+        s.path = signedObj.value(QStringLiteral("path")).toString();
         s.pubkey      = pubkey;
         s.fingerprint = StationIdentity::fingerprint(pubkey);
         s.keySource   = signedObj.value(QStringLiteral("keySource")).toString();  // #4 trusted (inside the verified bytes)
@@ -645,8 +651,14 @@ void ReceiverUiBackend::ingestAnnounce(const QVariant& payload)
         }
     }
 
-    const QString key = s.topic + "|" + s.name;
-    const bool isNew = !m_stations.contains(key);
+    // #114 a signed station is its key + stream path, not its name: renaming it replaces the entry instead
+    // of leaving the old name listed next to the new one.
+    const QString key = (s.verified && !s.pubkey.isEmpty())
+        ? s.topic + QStringLiteral("|pk:") + s.pubkey + QLatin1Char('|') + s.path
+        : s.topic + QLatin1Char('|') + s.name;
+    const auto prev = m_stations.constFind(key);
+    const bool isNew = prev == m_stations.constEnd();
+    if (!isNew && prev->name != s.name) log("\"" + prev->name + "\" is now \"" + s.name + "\"");
     m_stations.insert(key, s);
     diag(QStringLiteral("ingest ok: \"%1\" verified=%2 topic=%3 url=%4")
              .arg(s.name).arg(s.verified ? "yes" : "no").arg(s.topic, s.streamUrl.left(40)));

@@ -57,6 +57,7 @@ private:
         qint64  lastSeenMs = 0;
         qint64  startedAt = 0;  // #112 from the SIGNED announce: (startedAt, seq) orders announces per station
         qint64  seq = 0;
+        QString path;           // #114 stream path from the signed announce (part of the station's identity)
     };
 
     void wireDeliveryEvents();                       // subscribe to delivery events AFTER createNode (reentrancy)
@@ -106,7 +107,10 @@ private:
     bool          m_audioFlowing = false;   // #23 ffplay emitted decode stats → real audio is flowing
     int           m_reapCount   = 0;        // #23 how many times we've reaped the listener Tor this play
 
-    QHash<QString, Station> m_stations;   // keyed by topic+name
+    QHash<QString, Station> m_stations;   // keyed by stationKey(): signed → topic|pubkey|path, unsigned → topic|name
+    // #114 newest (startedAt, seq) seen per signed station (pubkey|path). Outlives the 45 s TTL, so a replayed
+    // old announce can't resurrect a station or an old NAME after its entry expired.
+    QHash<QString, QPair<qint64, qint64>> m_highWater;
     QSet<QString> m_subscribed;
 
     // #69 private streams — a derived hash(Title+Pass) topic we subscribed to, with the AEAD key +

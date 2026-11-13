@@ -250,12 +250,48 @@ Item {
         else logos.watch(backend.pinStation(pubkey), function(){}, function(){})
     }
 
+    // Basecamp notifications (basecamp.notifications.post, NOTIFICATIONS-SPEC.md in
+    // xAlisher/basecamp-theming@notifications): tell the user when a station appears.
+    // One notification, tagged "stations", so a burst reads "3 new stations" instead of
+    // three toasts. Basecamp hides it while Receiver is the open tab. A Basecamp without
+    // the intent answers not_declared/unavailable; that is ignored.
+    property var seenStations: ({})
+    property var freshNames: []
+    property double freshSince: 0
+    function noticeNewStations() {
+        if (!backend || typeof logos === "undefined" || !logos.request) return
+        var all
+        try { all = JSON.parse(backend.stationsJson) } catch (e) { return }
+        var fresh = []
+        for (var i = 0; i < all.length; i++) {
+            var key = all[i].pubkey || all[i].name
+            if (!key || root.seenStations[key]) continue
+            root.seenStations[key] = true
+            fresh.push(all[i].name || "Unnamed station")
+        }
+        if (fresh.length === 0) return
+        var now = Date.now()
+        if (now - root.freshSince > 10 * 60 * 1000) root.freshNames = []   // a new burst after 10 min
+        root.freshSince = now
+        root.freshNames = fresh.concat(root.freshNames).slice(0, 20)
+        var n = root.freshNames.length
+        logos.request("basecamp.notifications.post", {
+            title: n === 1 ? "New station" : n + " new stations",
+            body: root.freshNames.slice(0, 5).join(", ") + (n > 5 ? "…" : ""),
+            level: "info",
+            tag: "stations"
+        }, function (res) {
+            if (!res.ok) console.log("Receiver: notification not posted:", res.error)
+        })
+    }
+
     function startPlay(url, name) { if (backend) backend.play(url, name) }   // phase derives from the backend
     function stopPlay()           { if (backend) backend.stopPlayback() }
 
     Connections {
         target: backend
         ignoreUnknownSignals: true
+        function onStationsJsonChanged() { root.noticeNewStations() }
         function onActivity(line) {
             var next = root.events.slice()
             next.unshift("[" + Qt.formatTime(new Date(), "hh:mm:ss") + "] " + line)
